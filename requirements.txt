@@ -1,0 +1,20 @@
+# GRAVITY CUP – Laufzeitumgebung
+#
+# Installieren:  pip install -r requirements.txt
+#
+# Versionen sind festgenagelt, weil Determinismus daran haengt: eine andere
+# pymunk-Version kann denselben Seed anders rechnen, eine andere Pillow-
+# Version rastert Schrift anders. Wer aktualisiert, macht vorher einen
+# Referenzlauf und vergleicht.
+
+pillow==12.3.0          # Bilder (B1)
+pymunk==7.3.0           # Physik (B2)
+numpy==2.5.1            # Tonsynthese (B3)
+scipy==1.18.0           # schnelle Filterung fuer die Lautheitsmessung (B3)
+
+# ffmpeg (B5) kommt als mitgeliefertes Programm in diesem Paket. Bewusst so
+# und nicht systemweit: nichts ausserhalb des Projekts wird veraendert, es
+# braucht keine Adminrechte, und auf einem zweiten Rechner reicht wieder
+# `pip install -r requirements.txt`. Die genaue ffmpeg-Fassung haengt an der
+# Paketversion – sie gehoert damit ins Rundenarchiv wie jede andere auch.
+imageio-ffmpeg==0.6.0   # bringt ffmpeg 7.1 mit (B5)

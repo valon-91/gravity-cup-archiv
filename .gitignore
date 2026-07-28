@@ -1,0 +1,26 @@
+# Zugangsdaten
+config/.env
+
+# lokale Daten
+data/
+
+# erzeugte Bilder, Zwischenstaende, fertige Videos
+probe/
+probe_*/
+branding/
+frames/
+out/
+*.mp4
+*.wav
+
+# Schriftdateien werden nicht ins Git gelegt (Lizenz je Schrift pruefen)
+assets/fonts/*.ttf
+assets/fonts/*.otf
+
+# Python
+__pycache__/
+*.pyc
+
+# Betriebssystem
+Thumbs.db
+Desktop.ini
