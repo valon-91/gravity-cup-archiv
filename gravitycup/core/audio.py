@@ -231,9 +231,9 @@ TRUE_PEAK_OVERSAMPLE = 4
 #: Soll der True Peak auf TARGET_TRUE_PEAK nachgezogen werden?
 #:
 #: AUS, und das ist eine offene Entscheidung, keine Nachlaessigkeit: das
-#: Nachziehen kostet rund 2 LU Lautheit (siehe `normalize`). Umschalten
-#: aendert den Klang JEDER kuenftigen Folge – vorher lesen, was in
-#: `docs/naechste-schritte.md` unter „Ton" dazu steht.
+#: Nachziehen bringt den True Peak exakt auf TARGET_TRUE_PEAK, kostet dabei
+#: aber rund 2 LU Lautheit (Begruendung in `normalize`). Umschalten aendert
+#: den Klang JEDER kuenftigen Folge.
 TRUE_PEAK_NACHZIEHEN = False
 
 

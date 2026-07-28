@@ -264,9 +264,10 @@ def lauf_fingerabdruck(disziplin, seed: int) -> str:
 #: gibt – die Beschreibung laesst den Abschnitt dann weg, statt auf eine
 #: Adresse zu verweisen, die niemand aufrufen kann.
 #:
-#: Gespiegelter Ausschnitt dieses Repos, siehe tools/veroeffentlichen.py.
-#: Wer hier etwas aendert, muss abgleichen, BEVOR die Folge hochgeht –
-#: sonst laeuft der Pruefbefehl unter dem Video ins Leere.
+#: Das Archiv ist ein gespiegelter Ausschnitt dieses Repos; der Abgleich
+#: selbst liegt im Entwicklungsrepo. Wer hier etwas aendert, muss abgleichen,
+#: BEVOR die Folge hochgeht – sonst laeuft der Pruefbefehl unter dem Video
+#: ins Leere.
 ARCHIV_URL = "https://github.com/valon-91/gravity-cup-archiv"
 
 #: Anzeigenamen der Disziplinen fuer Titel und Beschreibung.
