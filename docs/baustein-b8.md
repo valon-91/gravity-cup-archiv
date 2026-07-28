@@ -201,3 +201,28 @@ Vorteil – dieselbe Lehre wie der gespiegelte Zickzack in B4.
   (Sturzrennen 7,4 bei n=500, Eliminierung 1,9 bei n=200). Unter der
   kritischen Schwelle, aber der Abstand ist kleiner. Vor dem Saisonstart
   einmal mit n = 2000 nachmessen.
+
+  **Nachgemessen am 29.07.2026 – und der Wert hält nicht.**
+
+  | n | χ² | p | stärkster Platz |
+  |---|---|---|---|
+  | 800 (B8, oben) | 6,92 | 0,14 | 22,1 % |
+  | **2000** | **10,82** | **0,029** | 22,4 % (Platz 3, x=618) |
+
+  Bei n = 2000 liegt χ² **über** der kritischen 9,49. Die 6,92 aus B8 war
+  eine glückliche Stichprobe, keine Entwarnung – der Code der Disziplin hat
+  sich seither nicht geändert.
+
+  Einordnung, damit die Zahl nicht größer wirkt, als sie ist: der Effekt ist
+  **2,4 Prozentpunkte**. Die Schräglagen, die B8 tatsächlich als Fehler
+  behoben hat, lagen bei 25,0 % und 24,8 %. Die Streuung ist heute näher an
+  fair als das, was damals repariert wurde – sie besteht den formalen Test
+  nur nicht mehr.
+
+  Zum Vergleich, gleicher Test, gleiche Nacht: Sturzrennen χ² 8,43
+  (p = 0,077, n = 300), Eliminierung χ² 1,85 (p = 0,76, n = 200). Beide
+  unter der Schwelle.
+
+  **Nicht angefasst.** Die Geometrie zu ändern hieße, S01R03, S01R06 und
+  S01R09 neu zu bauen, und es ist eine Design-Entscheidung. Sie gehört
+  Valon, nicht einem nächtlichen Alleingang.

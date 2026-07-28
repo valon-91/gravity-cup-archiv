@@ -224,6 +224,35 @@ def measure_lufs(stereo: np.ndarray) -> float:
     return float(10 * math.log10(np.mean(10 ** (behalten / 10))) - 0.691)
 
 
+#: Ueberabtastung fuer die True-Peak-Messung. BS.1770-4 verlangt mindestens
+#: das Vierfache bei 48 kHz.
+TRUE_PEAK_OVERSAMPLE = 4
+
+#: Soll der True Peak auf TARGET_TRUE_PEAK nachgezogen werden?
+#:
+#: AUS, und das ist eine offene Entscheidung, keine Nachlaessigkeit: das
+#: Nachziehen kostet rund 2 LU Lautheit (siehe `normalize`). Umschalten
+#: aendert den Klang JEDER kuenftigen Folge – vorher lesen, was in
+#: `docs/naechste-schritte.md` unter „Ton" dazu steht.
+TRUE_PEAK_NACHZIEHEN = False
+
+
+def true_peak(stereo: np.ndarray, faktor: int = TRUE_PEAK_OVERSAMPLE) -> float:
+    """Groesster Wert ZWISCHEN den Abtastpunkten, linear.
+
+    Der Unterschied zu `np.abs(x).max()` ist nicht theoretisch. Zwischen zwei
+    Abtastwerten kann die rekonstruierte Welle deutlich hoeher ausschlagen als
+    an den Punkten selbst – am staerksten bei kurzen, harten Transienten. Also
+    genau bei dem, woraus diese Tonspur besteht: Klicks.
+
+    Gemessen am 29.07.2026 an den ersten neun Folgen: Sample-Peak brav unter
+    der Grenze, True Peak bis **+3,6 dBFS**. Acht von neun Folgen uebersteuern.
+    """
+    from scipy.signal import resample_poly
+    hoch = resample_poly(stereo.astype(np.float64), faktor, 1, axis=0)
+    return float(np.abs(hoch).max())
+
+
 def normalize(stereo: np.ndarray) -> tuple[np.ndarray, dict]:
     """Auf die Ziel-Lautheit bringen und den Spitzenwert begrenzen."""
     vorher = measure_lufs(stereo)
@@ -238,12 +267,35 @@ def normalize(stereo: np.ndarray) -> tuple[np.ndarray, dict]:
         aus = np.tanh(aus / grenze * 1.1) * grenze
         begrenzt = True
 
+    # Der weiche Limiter drueckt den SAMPLE-Peak unter die Grenze, den True
+    # Peak nicht – tanh verschaerft die Flanken sogar. Gemessen an den ersten
+    # neun Folgen: True Peak bis +3,6 dBFS, acht von neun uebersteuern.
+    #
+    # Das Nachziehen ist bewusst ABGESCHALTET. Es waere eine reine Skalierung
+    # und wuerde den True Peak exakt auf die Grenze bringen – aber es nimmt
+    # dabei rund 2 LU Lautheit mit, von -14 auf etwa -16 LUFS. YouTube regelt
+    # lautes Material herunter und leises NICHT herauf; die Folge klaenge
+    # danach leiser als alles neben ihr.
+    #
+    # Beides ist ein Fehler, und die Wahl zwischen ihnen ist keine, die ein
+    # Programm treffen sollte. Der richtige Weg ist ein echter Limiter mit
+    # Vorausschau, der nur die Transienten greift statt das ganze Signal –
+    # das aendert den Klangcharakter und gehoert besprochen.
+    # Bis dahin: gemessen und sichtbar, aber unveraendert.
+    tp = true_peak(aus)
+    tp_begrenzt = False
+    if TRUE_PEAK_NACHZIEHEN and tp > grenze:
+        aus = aus * (grenze / tp)
+        tp_begrenzt = True
+
     return aus, {
         "lufs_vorher": round(vorher, 2),
         "lufs_nachher": round(measure_lufs(aus), 2),
         "verstaerkung_db": round(TARGET_LUFS - vorher, 2),
         "spitze_dbfs": round(20 * math.log10(max(1e-9, float(np.abs(aus).max()))), 2),
+        "true_peak_dbfs": round(20 * math.log10(max(1e-9, true_peak(aus))), 2),
         "begrenzt": begrenzt,
+        "true_peak_begrenzt": tp_begrenzt,
     }
 
 
@@ -326,9 +378,11 @@ def main() -> int:
     print(f"Lautheit    {messung['lufs_vorher']:+.2f} LUFS gemessen "
           f"-> {messung['lufs_nachher']:+.2f} LUFS "
           f"(Ziel {TARGET_LUFS:+.1f}, Korrektur {messung['verstaerkung_db']:+.2f} dB)")
-    print(f"Spitze      {messung['spitze_dbfs']:+.2f} dBFS "
+    print(f"Spitze      {messung['spitze_dbfs']:+.2f} dBFS Sample"
+          f"{', begrenzt' if messung['begrenzt'] else ''}")
+    print(f"True Peak   {messung['true_peak_dbfs']:+.2f} dBFS "
           f"(Grenze {TARGET_TRUE_PEAK:+.1f}"
-          f"{', begrenzt' if messung['begrenzt'] else ''})")
+          f"{', nachgezogen' if messung['true_peak_begrenzt'] else ''})")
     print(f"gerechnet in {dauer:.1f}s")
     return 0
 
