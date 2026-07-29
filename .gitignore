@@ -1,5 +1,12 @@
-# Zugangsdaten
-config/.env
+# Zugangsdaten – der GANZE Ordner, nicht nur die .env.
+#
+# Hier lagen bis zum 29.07.2026 nur `config/.env`. Eine
+# `client_secret.json` daneben waere von Git klaglos mitgenommen worden –
+# und in einem Repo, das einen oeffentlichen Spiegel hat, ist das nicht
+# wiedergutzumachen. Deshalb: alles ausschliessen, die Beschreibung
+# ausdruecklich wieder hereinholen.
+config/*
+!config/LIESMICH.md
 
 # lokale Daten
 data/

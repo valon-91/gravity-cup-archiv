@@ -18,3 +18,11 @@ scipy==1.18.0           # schnelle Filterung fuer die Lautheitsmessung (B3)
 # `pip install -r requirements.txt`. Die genaue ffmpeg-Fassung haengt an der
 # Paketversion – sie gehoert damit ins Rundenarchiv wie jede andere auch.
 imageio-ffmpeg==0.6.0   # bringt ffmpeg 7.1 mit (B5)
+
+# Hochladen zu YouTube. Diese drei beruehren den Determinismus NICHT – sie
+# laufen erst, wenn die Folge fertig gerechnet ist. Wer eine Runde nur
+# nachrechnen will (`--pruefen`), braucht sie gar nicht; das Nachrechnen
+# haengt bewusst an nichts ausser der Physik.
+google-api-python-client==2.198.0
+google-auth-oauthlib==1.4.0
+google-auth==2.56.2
