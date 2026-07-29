@@ -385,6 +385,13 @@ def simulate(track: Track, seed: int, *, fps: int = theme.FPS,
 
     # Startplaetze werden ZUFAELLIG zugelost. Welcher Platz besser ist,
     # entscheidet die Geometrie – niemand soll ihn sich aussuchen koennen.
+    #
+    # ACHTUNG: zwischen `random.Random(seed)` oben und diesem Mischen darf
+    # kein weiterer Zufall aus `rng` gezogen werden. Jede Fairnessmessung im
+    # Projekt spielt genau diese Auslosung nach, um einen Sieg dem richtigen
+    # STARTPLATZ zuzuordnen. Ein Zufallsgriff dazwischen macht jede
+    # --fairness-Ausgabe zu Rauschen, ohne dass sonst etwas auffaellt.
+    # Festgehalten in tests/test_b2_physics.py::TestStartauslosung.
     plaetze = list(range(count))
     rng.shuffle(plaetze)
 
@@ -551,6 +558,106 @@ def simulate(track: Track, seed: int, *, fps: int = theme.FPS,
         marks=list(marks or []),
         extras=dict(extras or {}),
     )
+
+
+# ---------------------------------------------------------------------------
+# Fairness auswerten
+#
+# Warum das hier steht und nicht dreimal in den Disziplinen: am 29.07.2026
+# hat eine Auswertung von Hand zu einem falschen Alarm gefuehrt. Die
+# Streuung wurde mit n=2000 gemessen, chi2 kam auf 10,8 und riss die
+# kritische 9,49 – gemeldet als „Disziplin ist unfair". Tatsaechlich reisst
+# das Sturzrennen dieselbe Schwelle schon bei n=1200, und die Effektstaerke
+# aller drei Disziplinen ist praktisch gleich (21,6 bis 22,2 % staerkster
+# Platz).
+#
+# Der Fehler: **chi2 waechst mit der Stichprobe.** Eine feste Schwelle ist
+# nur bei fester Stichprobengroesse eine Aussage. Wer laenger misst, findet
+# jeden noch so kleinen Effekt – und haelt ihn faelschlich fuer neu.
+#
+# Deshalb liefert diese Auswertung den Vergleichsmassstab MIT: wie stark der
+# staerkste Platz allein durch Zufall bei genau dieser Laufzahl waere.
+# ---------------------------------------------------------------------------
+
+
+def startplatz_statistik(siege, ziehungen: int = 20000,
+                         seed: int = 12345) -> dict:
+    """Chi-Quadrat, p-Wert und ein ehrlicher Vergleichsmassstab.
+
+    `siege` ist die Anzahl Siege je Startplatz.
+
+    Zurueck kommt neben chi2 und p vor allem `zufall_*`: wie hoch der
+    staerkste Platz bei derselben Laufzahl allein durch Zufall typischerweise
+    liegt. Das ist die Zahl, die fehlte – ohne sie sagt „staerkster Platz
+    22,2 %" nichts darueber, ob 22,2 % viel ist.
+    """
+    werte = list(siege.values()) if isinstance(siege, dict) else list(siege)
+    k = len(werte)
+    n = sum(werte)
+    if n == 0 or k < 2:
+        return {"laeufe": 0, "chi2": 0.0, "p": 1.0, "staerkster_anteil": 0.0,
+                "zufall_typisch": 0.0, "zufall_grenze": 0.0, "cramers_v": 0.0}
+
+    erwartet = n / k
+    chi2 = sum((o - erwartet) ** 2 / erwartet for o in werte)
+
+    # Ueberlebensfunktion der Chi-Quadrat-Verteilung. Fuer gerade
+    # Freiheitsgrade geschlossen, sonst ueber scipy – das vermeidet eine
+    # harte Abhaengigkeit fuer den Normalfall (5 Teilnehmer, df=4).
+    df = k - 1
+    if df % 2 == 0:
+        h = df // 2
+        term, summe = 1.0, 1.0
+        for i in range(1, h):
+            term *= (chi2 / 2) / i
+            summe += term
+        p = math.exp(-chi2 / 2) * summe
+    else:                                                # pragma: no cover
+        from scipy import stats
+        p = float(1 - stats.chi2.cdf(chi2, df))
+
+    # Vergleichsmassstab durch Ziehen: wie sieht der staerkste Platz aus,
+    # wenn NICHTS im Argen ist? Gerechnet statt geschaetzt, damit die Zahl
+    # zur tatsaechlichen Laufzahl passt.
+    #
+    # Ueber die Multinomialverteilung statt Griff fuer Griff – bei 3600
+    # Laeufen und 20000 Ziehungen waeren das sonst 72 Millionen Einzelgriffe
+    # fuer eine Zeile Ausgabe.
+    import numpy as np
+    zieher = np.random.default_rng(seed)
+    maxima = np.sort(
+        zieher.multinomial(n, [1 / k] * k, size=ziehungen).max(axis=1) / n)
+
+    return {
+        "laeufe": n,
+        "chi2": chi2,
+        "p": max(0.0, min(1.0, p)),
+        "staerkster_anteil": max(werte) / n,
+        "zufall_typisch": float(maxima[len(maxima) // 2]),
+        "zufall_grenze": float(maxima[int(len(maxima) * 0.95)]),
+        "cramers_v": math.sqrt(chi2 / n / df),
+    }
+
+
+def fairness_urteil(stat: dict) -> tuple[bool, str]:
+    """(in Ordnung?, Begruendung) – nach Effektstaerke, nicht nach chi2.
+
+    Gemessen wird gegen den Zufallsmassstab derselben Laufzahl. Eine feste
+    chi2-Schwelle taugt dafuer nicht: sie wird strenger, je laenger man
+    misst, ohne dass sich an der Strecke etwas aendert.
+    """
+    stark = stat["staerkster_anteil"]
+    if stark > 0.30:
+        return False, (f"ein Startplatz gewinnt {stark * 100:.1f} % – das "
+                       f"Rennen ist vor dem Start entschieden")
+    if stark > stat["zufall_grenze"]:
+        return True, (f"staerkster Platz {stark * 100:.1f} % liegt ueber dem "
+                      f"Zufallsrahmen ({stat['zufall_grenze'] * 100:.1f} %), "
+                      f"aber unter der 30-%-Grenze – auffaellig, nicht "
+                      f"unfair")
+    return True, (f"staerkster Platz {stark * 100:.1f} % liegt im "
+                  f"Zufallsrahmen dieser Laufzahl "
+                  f"(bis {stat['zufall_grenze'] * 100:.1f} %)")
 
 
 # ---------------------------------------------------------------------------

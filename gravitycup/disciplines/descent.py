@@ -427,25 +427,36 @@ def main() -> int:
             print(f"  Platz {p} x={track.starts[p][0]:4.0f}: {n:3d} Siege "
                   f"({anteil:4.1f} %)  {'#' * n}")
         print()
+        stat = physics.startplatz_statistik(f["siege"])
         print(f"  erwartet je Platz: {f['erwartet']:.1f} Siege (20 %)")
-        print(f"  staerkster Platz:  {f['staerkster_anteil'] * 100:.1f} %")
+        print(f"  staerkster Platz:  {f['staerkster_anteil'] * 100:.1f} %"
+              f"   – durch Zufall allein waeren bei {stat['laeufe']} Laeufen"
+              f" {stat['zufall_typisch'] * 100:.1f} % typisch,"
+              f" bis {stat['zufall_grenze'] * 100:.1f} % unauffaellig")
+        print(f"  Chi-Quadrat:       {stat['chi2']:.2f}  (p={stat['p']:.3f}, "
+              f"Cramers V {stat['cramers_v']:.3f})")
+        print(f"                     Achtung: Chi-Quadrat waechst mit der "
+              f"Laufzahl. Eine feste Schwelle")
+        print(f"                     ist nur bei fester Laufzahl eine Aussage "
+              f"– vergleiche die Effektstaerke.")
         print(f"  verschiedene Zielzeiten: {f['verschiedene_zeiten']} "
               f"von {f['laeufe']}  "
               f"({f['zeit_spanne'][0]:.1f}s .. {f['zeit_spanne'][1]:.1f}s)")
         print(f"  ohne Zieleinlauf verworfen: {f['kaputt']} "
               f"({f['kaputt_anteil'] * 100:.0f} % der Seeds)")
         print()
+        ok, grund = physics.fairness_urteil(stat)
         if f["kaputt_anteil"] > 0.25:
             print("  ! Zu viele Seeds erreichen das Ziel nie – irgendwo klemmt")
             print("    das Feld. Pruefen mit --geometrie 60.")
-        elif f["staerkster_anteil"] > 0.30:
-            print("  ! Ein Startplatz gewinnt zu oft – das Rennen ist vor dem")
-            print("    Start entschieden. Strecke aendern, nicht veroeffentlichen.")
+        elif not ok:
+            print(f"  ! {grund}.")
+            print("    Strecke aendern, nicht veroeffentlichen.")
         elif f["verschiedene_zeiten"] < f["laeufe"] * 0.5:
             print("  ! Zu wenige verschiedene Zielzeiten – die Laeufe aehneln")
             print("    sich zu stark (Massenproduktions-Muster).")
         else:
-            print("  in Ordnung: kein Startplatz dominiert, Laeufe unterscheiden sich")
+            print(f"  in Ordnung: {grund}, Laeufe unterscheiden sich")
         return 0
 
     if a.search:

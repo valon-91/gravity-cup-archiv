@@ -568,19 +568,26 @@ def main() -> int:
             print(f"  Platz {p} x={track.starts[p][0]:4.0f}: {n:3d} Siege "
                   f"({anteil:4.1f} %)  {'#' * n}")
         print()
+        stat = physics.startplatz_statistik(f["siege"])
         print(f"  erwartet je Platz: {f['erwartet']:.1f} Siege (20 %)")
-        print(f"  staerkster Platz:  {f['staerkster_anteil'] * 100:.1f} %")
+        print(f"  staerkster Platz:  {f['staerkster_anteil'] * 100:.1f} %"
+              f"   – durch Zufall allein waeren bei {stat['laeufe']} Laeufen"
+              f" {stat['zufall_typisch'] * 100:.1f} % typisch,"
+              f" bis {stat['zufall_grenze'] * 100:.1f} % unauffaellig")
+        print(f"  Chi-Quadrat:       {stat['chi2']:.2f}  (p={stat['p']:.3f}, "
+              f"Cramers V {stat['cramers_v']:.3f})  – waechst mit der Laufzahl")
         print(f"  verschiedene Zielzeiten: {f['verschiedene_zeiten']} "
               f"von {f['laeufe']}")
         print(f"  ohne Ergebnis verworfen: {f['kaputt']} "
               f"({f['kaputt_anteil'] * 100:.0f} % der Seeds)")
         print()
+        ok, grund = physics.fairness_urteil(stat)
         if f["kaputt_anteil"] > 0.25:
             print("  ! Zu viele Seeds ohne Ergebnis – pruefen mit --geometrie 60.")
-        elif f["staerkster_anteil"] > 0.30:
-            print("  ! Ein Startplatz gewinnt zu oft.")
+        elif not ok:
+            print(f"  ! {grund}.")
         else:
-            print("  in Ordnung: kein Startplatz dominiert")
+            print(f"  in Ordnung: {grund}")
         return 0
 
     if a.search:

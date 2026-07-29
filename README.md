@@ -54,7 +54,7 @@ zum Nachrechnen gebraucht wird, ist hier.
 | `gravitycup/season/` | Punktestand und Tabellengrafik |
 | `gravitycup/build.py` | Seed rein, MP4 raus, Manifest ins Archiv |
 | `runs/*.json` | ein Manifest je **gesendeter** Runde – kommende Folgen fehlen hier bewusst, sonst stünde ihr Ausgang hier vor der Ausstrahlung |
-| `tests/` | 225 unittest, ohne pytest lauffähig |
+| `tests/` | 235 unittest, ohne pytest lauffähig |
 | `docs/baustein-*.md` | je Baustein die gemessenen Zahlen und die Fehler, die dabei gefunden wurden |
 
 ```bash
