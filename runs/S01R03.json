@@ -1,0 +1,91 @@
+{
+  "kanal": "GRAVITY CUP",
+  "runde": "S01R03",
+  "disziplin": "scatter",
+  "seed": 3,
+  "erzeugt": "2026-07-28T20:43:33+00:00",
+  "codestand": {
+    "commit": "036ce7a7c029fcb1a03f89f5447eff89a50f00fa",
+    "sauber": true
+  },
+  "versionen": {
+    "python": "3.12.10",
+    "system": "Windows 11",
+    "pymunk": "7.3.0",
+    "numpy": "2.5.1",
+    "pillow": "12.3.0",
+    "ffmpeg": "ffmpeg version 7.1-essentials_build-www.gyan.dev Copyright (c) 2000-2024 the FFmpeg developers",
+    "scipy": "1.18.0"
+  },
+  "gestaltung": {
+    "aufloesung": "1080x1920",
+    "fps": 30,
+    "supersample": 2,
+    "schrift": "C:\\WINDOWS\\Fonts\\bahnschrift.ttf",
+    "schrift_im_projekt": false
+  },
+  "kodierung": {
+    "crf": 19,
+    "preset": "slow",
+    "video": "libx264 yuv420p bt709",
+    "ton": "aac 192k 48000 Hz stereo"
+  },
+  "ergebnis": {
+    "reihenfolge": [
+      "GOLD",
+      "RED",
+      "VIOLET",
+      "JADE",
+      "BLUE"
+    ],
+    "reihenfolge_index": [
+      1,
+      0,
+      4,
+      2,
+      3
+    ],
+    "sieger": "GOLD",
+    "zielzeiten": {
+      "VIOLET": 22.021,
+      "GOLD": 23.745,
+      "RED": 25.059,
+      "JADE": 27.341,
+      "BLUE": 29.403
+    },
+    "dauer_s": 31.07,
+    "bilder": 932,
+    "aufpraelle": 377
+  },
+  "annahme": [],
+  "punkteschluessel": [
+    10,
+    6,
+    4,
+    2,
+    1
+  ],
+  "ton_messung": {
+    "lufs_vorher": -21.88,
+    "lufs_nachher": -14.56,
+    "verstaerkung_db": 7.88,
+    "spitze_dbfs": -1.52,
+    "begrenzt": true
+  },
+  "pruefsummen": {
+    "geometrie": "ac9dd8bb1c85a1da36aabb906970d964f3128290e696504079274f2adf27d440",
+    "lauf": "643a69817bb0fb51a0ed4c2a116e4150fca64cc72572c36758320c1209db2a02",
+    "state_json": "17d2a9c63715fb96656aa300fd8e314a24a984543304a17b250fc7e2631dc7bf",
+    "bildfolge": "c648e105e88d203c9cd6e68864d805cc4f2c42cd8dc82928876456256ef31824",
+    "wav": "d00f632444745947de9188cbe44350e60b3d1a06b3f708d6a3aa1450cbdc03f5",
+    "mp4": "91a2fe7d64e89937bc327beb5d68c2469e6571afbbf2909ca1c1b49904ef47f7",
+    "hinweis": "lauf, bildfolge und wav sind harte Zusagen: gleiche Versionen, gleicher Seed -> Bit fuer Bit dasselbe. mp4 ist nur ein Beleg, WELCHE Datei veroeffentlicht wurde – x264 haengt an der Threadzahl und ist nicht wiederholbar. Nachgerechnet wird die Reihenfolge: python -m gravitycup.build --pruefen"
+  },
+  "video": {
+    "bilder": 992,
+    "dauer_s": 33.067,
+    "nachlauf_s": 2.0
+  },
+  "laufzeit_s": 244.2,
+  "youtube_id": "VUweItMKrM8"
+}
