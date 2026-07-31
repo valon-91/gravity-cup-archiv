@@ -35,14 +35,25 @@ if hasattr(sys.stdout, "reconfigure"):
 ZEILE = 148
 #: Oberkante der ersten Zeile. Darueber stehen Titel und Unterzeile.
 TABELLE_OBEN = 560
-#: Linke Kante der Tabelle.
-RAND = theme.SAFE_LEFT + 46
-#: Rechte Kante. Getrennt gerechnet, NICHT symmetrisch zu RAND: die sichere
-#: Zone ist rechts breiter (SAFE_RIGHT 190 gegen SAFE_LEFT 40), weil dort
-#: die Shorts-Knopfleiste sitzt. Eine symmetrische Tabelle ragte 104 px
-#: darunter, die Punktzahlen 58 px – ausgerechnet die Spalte, auf die es
-#: ankommt.
-RAND_RECHTS = theme.WIDTH - theme.SAFE_RIGHT
+#: Linke und rechte Kante der Tabelle.
+#:
+#: Als FUNKTIONEN, nicht als Konstanten. Sie standen bis zum 30.07.2026 als
+#: Modulkonstanten da und froren damit `theme.SAFE_LEFT` und `theme.WIDTH`
+#: beim Import ein – seit es zwei Ausgabeformate gibt, waere die Tabelle im
+#: Vollbild danach immer noch 1080 px breit gewesen, mit den Raendern des
+#: Hochformats. Die einzige Stelle im Projekt, die das tat.
+#:
+#: Rechts wird getrennt gerechnet, NICHT symmetrisch: im Hochformat ist die
+#: sichere Zone rechts breiter (SAFE_RIGHT 190 gegen SAFE_LEFT 40), weil
+#: dort die Shorts-Knopfleiste sitzt. Eine symmetrische Tabelle ragte
+#: 104 px darunter, die Punktzahlen 58 px – ausgerechnet die Spalte, auf
+#: die es ankommt.
+def rand() -> float:
+    return theme.SAFE_LEFT + 46
+
+
+def rand_rechts() -> float:
+    return theme.WIDTH - theme.SAFE_RIGHT
 
 
 def videokarte(tabelle: list[standings.Eintrag], saison: int | None,
@@ -57,9 +68,9 @@ def videokarte(tabelle: list[standings.Eintrag], saison: int | None,
     c.text_centered(392, f"AFTER {runden} ROUND{'S' if runden != 1 else ''}",
                     "result_label", fill=theme.TEXT_MUTED)
 
-    breite = RAND_RECHTS - RAND
+    breite = rand_rechts() - rand()
     hoehe = ZEILE * len(tabelle) + theme.PANEL_PAD * 2
-    c.panel((RAND, TABELLE_OBEN, RAND + breite, TABELLE_OBEN + hoehe),
+    c.panel((rand(), TABELLE_OBEN, rand() + breite, TABELLE_OBEN + hoehe),
             alpha=178)
 
     knapp = standings.punktgleich_an_der_spitze(tabelle)
@@ -74,23 +85,23 @@ def videokarte(tabelle: list[standings.Eintrag], saison: int | None,
         fuehrend = platz == 0 or (knapp and platz == 1)
         if fuehrend:
             c.draw.rounded_rectangle(
-                [c.s(RAND + 12), c.s(y - ZEILE / 2 + 6),
-                 c.s(RAND + breite - 12), c.s(y + ZEILE / 2 - 6)],
+                [c.s(rand() + 12), c.s(y - ZEILE / 2 + 6),
+                 c.s(rand() + breite - 12), c.s(y + ZEILE / 2 - 6)],
                 radius=c.s(16), fill=comp.color + (34,))
 
-        c.text(RAND + 46, y, f"{platz + 1}", "result_label",
+        c.text(rand() + 46, y, f"{platz + 1}", "result_label",
                fill=theme.TEXT_MUTED, anchor="lm")
-        draw.marble_on(c.draw, comp, c.s(RAND + 148), c.s(y), c.s(30))
-        c.text(RAND + 208, y, comp.name, "card_entry",
+        draw.marble_on(c.draw, comp, c.s(rand() + 148), c.s(y), c.s(30))
+        c.text(rand() + 208, y, comp.name, "card_entry",
                fill=comp.bright if fuehrend else theme.TEXT, anchor="lm")
 
         # Siege als kleine Nebenangabe – sie entscheiden den Gleichstand,
         # also gehoeren sie sichtbar in die Tabelle.
         if e.siege:
-            c.text(RAND + breite - 214, y,
+            c.text(rand() + breite - 214, y,
                    f"{e.siege} WIN{'S' if e.siege != 1 else ''}", "badge",
                    fill=theme.TEXT_MUTED, anchor="rm")
-        c.text(RAND + breite - 46, y, f"{e.punkte}", "result_name",
+        c.text(rand() + breite - 46, y, f"{e.punkte}", "result_name",
                fill=comp.bright if fuehrend else theme.TEXT, anchor="rm")
 
     fuss = TABELLE_OBEN + hoehe + 92

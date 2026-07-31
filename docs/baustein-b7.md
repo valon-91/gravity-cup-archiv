@@ -111,6 +111,43 @@ das echte Paar auf den Indizes 3 und 4 – die Reißverschluss-Paarung liefert
 Ordnung". Neu ist `tor_paare()`, das die Paare über ihre bekannte Position
 holt, und ein Test, der ein absichtlich zu enges Tor unterschiebt.
 
+### 6. Ein Tor wartete auf ein Ereignis, das schon vorbei war
+
+*Nachgetragen am 30.07.2026, gefunden bei einer Messung mit 30 Teilnehmern.*
+
+Die Regel zählte Querungen als **Ereignis** und schaute dabei auf genau ein
+Tor. Wer ein Tor passierte, **bevor** die Regel darauf umschaltete, wurde nie
+gezählt – und weil ein Tor auf `len(aktiv) - 1` Querungen wartet, wartete es
+dann für immer.
+
+Mit fünf Teilnehmern kann das nicht eintreten: das Feld ist enger als ein
+Abschnitt (Median 255 px, Maximum 1474 bei 1984 px Abschnittshöhe). Die
+Regel hatte damit eine **ungeschriebene Voraussetzung**, die nirgends
+notiert und nirgends geprüft war – dieselbe Fehlerklasse wie Fehler 5 oben.
+
+Gemessen mit 30 Teilnehmern und 29 Toren: **2 von 29 Ausscheidungen**, dann
+Stillstand. Nichts klemmte, die Kugeln fielen weiter – aber alle 28
+verbliebenen standen längst unter der Linie, auf die die Regel wartete. Das
+Feld spreizt sich bei 30 Teilnehmern im Median auf 2262 px und steht in
+**61 % der Bilder über mehr als einem Tor**.
+
+Neu ist `_querungen_mitschreiben`: jede Torquerung wird festgehalten, auch
+die von noch fernen Toren, mit ihrer echten interpolierten Zeit. Ein Zeiger
+je Teilnehmer sorgt dafür, dass das nicht jeden Rechenschritt alle Tore
+abklappert. Danach: **29 von 29** Ausscheidungen an drei Seeds.
+
+Die Änderung ist bei fünf Teilnehmern nachweislich **wirkungslos** – geprüft
+über 500 Seeds, Feld für Feld verglichen (Rangfolge, Ausscheidungszeiten,
+Zielzeiten, Aufprall- und Bildzahl): **500 von 500 identisch**. Dazu rechnen
+sich alle sechs archivierten Eliminierungsrunden unverändert nach. Das war
+die Bedingung, unter der die Regel überhaupt angefasst werden durfte: sie
+entscheidet den Ausgang bereits veröffentlichter Folgen, und ein
+abweichendes Ergebnis wäre über das öffentliche Archiv nachweisbar.
+
+Der Test dazu stellt den Fall mit fünf Teilnehmern nach, statt 30 zu
+simulieren – vier springen im selben Schritt über zwei Tore. Gegen die alte
+Fassung fällt er durch.
+
 ## Fairness
 
 | | Wert |

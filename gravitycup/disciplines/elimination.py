@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import random
 import sys
+from dataclasses import dataclass
 
 from ..core import physics, theme
 
@@ -130,6 +131,143 @@ MIN_SECONDS = 20.0
 MAX_SECONDS = 38.0
 SEARCH_CUTOFF = 46.0
 
+
+# ---------------------------------------------------------------------------
+# Bauart: dieselbe Disziplin in verschiedenen Massen
+#
+# Bis zum 30.07.2026 standen Schachtbreite, Rutschenzahl und Stiftdichte als
+# Modulkonstanten da. Fuer die Show braucht es beides nebeneinander: die
+# Kurzfolge in den Massen, in denen S01 und S02 gelaufen sind, und eine
+# laengere, engere Fassung mit groesserem Feld.
+#
+# Zwei Dinge sind dabei GEMESSEN und nicht geschaetzt:
+#
+#   * Enger heisst mehr Gedraenge. Kugel-Kugel-Anteil bei 20 Teilnehmern:
+#     37 % im 1000-px-Schacht, 46 % im 640-px-Schacht. Zum Vergleich: die
+#     ausgestrahlten Folgen liegen bei 16 %.
+#   * Laenge kommt aus der RUTSCHENZAHL, nicht aus der Hoehe, und zwar
+#     linear: 3 Rutschen je Abschnitt ergeben 3,0 s je Tor, 8 ergeben 9,1 s.
+#     Dieselbe Hoehe mit 4 statt 8 Rutschen halbiert die Zeit wieder. Die
+#     Bremse ist das Rollen, nicht der Weg – das steht schon oben bei
+#     RUTSCHEN_JE_ABSCHNITT und war nur nie auf die Laenge uebertragen.
+#
+# Und der Zielkonflikt, damit ihn niemand uebersieht: laengere Abschnitte
+# KOSTEN Gedraenge (39 % bei 1984 px, 20 % bei 6000 px). Mehr Fallweg heisst
+# mehr Zeit zum Auseinanderziehen.
+#
+# Die Vorgabewerte sind exakt die alten Konstanten. `--pruefen` haengt
+# daran: das Rundenmanifest speichert einen Fingerabdruck der Geometrie,
+# und jede Abweichung wuerde jede ausgestrahlte Folge als nicht mehr
+# nachrechenbar melden.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Bauart:
+    """Die Masse einer Strecke. Vorgabe = die Masse von S01 und S02."""
+
+    wand_links: float = WALL_LEFT
+    wand_rechts: float = WALL_RIGHT
+    rutschen: int = RUTSCHEN_JE_ABSCHNITT
+    rutsche_abstand: float = RUTSCHE_ABSTAND
+    stift_je_reihe: int = STIFT_JE_REIHE
+    start_abstand: float = START_SPACING
+
+    # -- abgeleitet, nie gewaehlt -----------------------------------------
+
+    @property
+    def breite(self) -> float:
+        return self.wand_rechts - self.wand_links
+
+    @property
+    def rutsche_drop_max(self) -> float:
+        """Gefaelle-Deckel: sonst faellt eine Rutsche fast auf die naechste."""
+        return self.rutsche_abstand - (MARBLE_D + 2 * SEG_RADIUS + 40)
+
+    @property
+    def stifte_oben(self) -> float:
+        tief = (RUTSCHE_OBEN + (self.rutschen - 1) * self.rutsche_abstand
+                + self.rutsche_drop_max)
+        return tief + 90.0
+
+    @property
+    def trichter_oben(self) -> float:
+        return (self.stifte_oben
+                + (STIFT_REIHEN - 1) * STIFT_REIHEN_ABSTAND + 110.0)
+
+    @property
+    def kontrollpunkt(self) -> float:
+        return self.trichter_oben + TRICHTER_HOEHE + 60.0
+
+    @property
+    def abschnitt(self) -> float:
+        return self.kontrollpunkt + 80.0
+
+    @property
+    def segmente_je_abschnitt(self) -> int:
+        """Rutschen plus die beiden Trichterhaelften. `tor_paare` verlaesst
+        sich darauf, und ein Test nagelt es fest."""
+        return self.rutschen + 2
+
+    def pruefen(self) -> None:
+        """Masse, bei denen gar nicht erst gebaut werden darf.
+
+        Billiger als ein Lauf, der nach 60 s Notbremse mit gestapelten
+        Kugeln endet – genau so sind in B7 die Seeds 20, 21 und 33
+        ausgegangen.
+        """
+        if self.breite < TOR_WEITE + 2 * SEG_RADIUS + 2 * MARBLE_D:
+            raise ValueError(
+                f"Schacht zu schmal: {self.breite:.0f} px lichte Weite, "
+                f"das Tor allein braucht {TOR_WEITE:.0f}")
+        if self.rutsche_drop_max <= 0:
+            raise ValueError(
+                f"Rutschenabstand {self.rutsche_abstand:.0f} px laesst kein "
+                f"Gefaelle uebrig (Kugel ist {MARBLE_D:.0f} px)")
+        if self.rutschen < 1:
+            raise ValueError("mindestens eine Rutsche je Abschnitt")
+        if self.stift_je_reihe < 2:
+            raise ValueError("mindestens zwei Stifte je Reihe")
+
+
+#: Die Masse, in denen S01 und S02 gelaufen sind.
+KURZ = Bauart()
+
+#: Die Show laeuft in DENSELBEN Massen. Das ist ein Messergebnis, kein
+#: Versaeumnis.
+#:
+#: Der erste Entwurf war enger und laenger (640 px, 8 Rutschen), weil ein
+#: Probelauf in einem blanken Rohr gezeigt hatte, dass enger mehr Gedraenge
+#: bringt: 46 % Kugel-Kugel gegen 37 % im breiten Rohr. In der ECHTEN
+#: Geometrie kehrt sich das um, weil dort Rutschen stehen und die das Feld
+#: auseinanderziehen. Gemessen mit 16 Teilnehmern ueber je drei Seeds:
+#:
+#:     1000 px, 3 Rutschen   88 s   5,9 s/Tor   23 %   <- diese
+#:      640 px, 3 Rutschen   52 s   3,5 s/Tor   18 %
+#:      800 px, 4 Rutschen   91 s   6,1 s/Tor   17 %
+#:      640 px, 5 Rutschen   87 s   5,8 s/Tor   13 %
+#:      640 px, 8 Rutschen  139 s   9,2 s/Tor    9 %
+#:
+#: Die Rutschenzahl beherrscht beides: sie macht die Laenge UND zerstreut
+#: das Feld. Acht Rutschen liefern die laengsten Laeufe und die langweiligsten.
+#:
+#: Die Laenge der Show kommt deshalb aus der Zahl der AKTE, nicht aus
+#: laengeren Abschnitten. Ein Akt sind rund 90 Sekunden.
+#:
+#: `Bauart` bleibt trotzdem: ohne die Parameter waere diese Tabelle nicht
+#: messbar gewesen, und die naechste Frage dieser Art kommt bestimmt.
+SHOW = Bauart()
+
+#: Feldgroesse der Show. 16, weil ab da die Tabelle unlesbar wird und die
+#: Farbpalette (theme.GROSSFELD) ausgeht – nicht, weil mehr nicht flossen.
+#: Gemessen fliessen bis 65 Teilnehmer sauber durch.
+SHOW_TEILNEHMER = 16
+
+
+def tore_fuer(teilnehmer: int) -> int:
+    """Es muss genau einer uebrig bleiben."""
+    return teilnehmer - 1
+
 #: Mindestabstand zweier Ausscheidungen. Fallen zwei Tore fast gleichzeitig,
 #: sieht der Zuschauer die erste gar nicht.
 MIN_ABSTAND_TORE = 1.2
@@ -171,12 +309,64 @@ class Elimination(physics.Regel):
         self.reihenfolge_raus: list[int] = []
         #: Fuers Bild: (Zeit, Kontrollpunkt, wer raus ist)
         self.ereignisse: list[tuple[float, int, int]] = []
+        #: Querungen JE TOR, mitgeschrieben unabhaengig davon, auf welches
+        #: Tor die Regel gerade schaut. Siehe `schritt`.
+        self._querung: list[dict[int, float]] = [{} for _ in range(count)]
+        #: Je Teilnehmer das naechste noch nicht gequerte Tor. Nur damit die
+        #: Mitschrift nicht bei jedem Rechenschritt alle Tore abklappert.
+        self._zeiger: list[int] = [0] * count
 
     # -- Ablauf ------------------------------------------------------------
+
+    def _querungen_mitschreiben(self, zeit_von: float, dt: float,
+                                y_vorher: list[float],
+                                y_jetzt: list[float]) -> None:
+        """Jede Torquerung festhalten, auch die von noch fernen Toren.
+
+        DAS ist der Unterschied zur ersten Fassung, und er ist der Grund,
+        warum die Disziplin ueberhaupt mehr als fuenf Teilnehmer vertraegt.
+
+        Vorher wurden Querungen nur fuer das GERADE AKTUELLE Tor gezaehlt.
+        Wer ein Tor passierte, bevor die Regel darauf umschaltete, wurde
+        nie gezaehlt – und weil das Tor auf `len(aktiv) - 1` Querungen
+        wartet, wartete es dann fuer immer.
+
+        Bei fuenf Teilnehmern kann das nicht eintreten: das Feld ist enger
+        als ein Abschnitt (gemessen: Median 255 px, Maximum 1474 bei
+        1984 px Abschnittshoehe). Die Regel hatte damit eine ungeschriebene
+        Voraussetzung, die nirgends geprueft wurde – dieselbe Fehlerklasse
+        wie die Torpruefung, die durch eine falsche Paarung nichts prueste
+        und trotzdem „in Ordnung" meldete.
+
+        Bei 30 Teilnehmern ist die Voraussetzung verletzt: das Feld spreizt
+        sich im Median auf 2262 px und steht in 61 % der Bilder ueber mehr
+        als einem Tor. Gemessen am 30.07.2026: 2 von 29 Ausscheidungen,
+        danach Stillstand, obwohl alle 28 verbliebenen Kugeln laengst unter
+        der Linie standen, auf die die Regel wartete.
+
+        Der Zeiger laeuft nur vorwaerts. Das ist zulaessig, weil
+        `linie_gequert` ohnehin nur Querungen NACH UNTEN zaehlt: eine Kugel,
+        die zurueckspringt, hat das Tor trotzdem passiert.
+        """
+        for i in self.aktiv:
+            z = self._zeiger[i]
+            while (z < len(self.kontrollpunkte)
+                   and y_jetzt[i] > self.kontrollpunkte[z]):
+                anteil = physics.linie_gequert(y_vorher[i], y_jetzt[i],
+                                               self.kontrollpunkte[z])
+                # `anteil is None` heisst: schon vor diesem Schritt drunter.
+                # Kommt beim allerersten Schritt vor und wenn eine Kugel in
+                # einem Schritt mehrere Tore ueberspringt.
+                self._querung[i][z] = zeit_von + (
+                    anteil if anteil is not None else 1.0) * dt
+                z += 1
+            self._zeiger[i] = z
 
     def schritt(self, zeit_von: float, dt: float,
                 y_vorher: list[float], y_jetzt: list[float],
                 x_jetzt: list[float] | None = None) -> set[int]:
+        self._querungen_mitschreiben(zeit_von, dt, y_vorher, y_jetzt)
+
         if self.tor >= len(self.kontrollpunkte):
             # Alle Tore durch. Der Letzte laeuft noch ins Ziel, damit das
             # Rennen einen sichtbaren Schlusspunkt hat.
@@ -189,13 +379,11 @@ class Elimination(physics.Regel):
                     self.zielzeiten[i] = zeit_von + anteil * dt
             return set()
 
-        linie = self.kontrollpunkte[self.tor]
-        for i in sorted(self.aktiv):
-            if i in self.durch:
-                continue
-            anteil = physics.linie_gequert(y_vorher[i], y_jetzt[i], linie)
-            if anteil is not None:
-                self.durch[i] = zeit_von + anteil * dt
+        # Wer das aktuelle Tor passiert hat, mit seiner ECHTEN Querungszeit –
+        # auch wenn das lange her ist. Die Zeit entscheidet gleich, wer
+        # rausfliegt, wenn alle im selben Schritt queren.
+        self.durch = {i: self._querung[i][self.tor]
+                      for i in self.aktiv if self.tor in self._querung[i]}
 
         if len(self.aktiv) <= 1 or len(self.durch) < len(self.aktiv) - 1:
             return set()
@@ -217,6 +405,10 @@ class Elimination(physics.Regel):
         self.ereignisse.append((zeit, self.tor, verlierer))
         self.aktiv.discard(verlierer)
         self.tor += 1
+        # `durch` wird beim naechsten Schritt aus `_querung` neu gebildet,
+        # jetzt fuer das naechste Tor. Hier geleert, damit ein Aufrufer, der
+        # zwischen zwei Schritten hineinschaut, nicht die Querungen des
+        # gerade verbrauchten Tores sieht.
         self.durch = {}
         return {verlierer}
 
@@ -244,26 +436,71 @@ class Elimination(physics.Regel):
 # ---------------------------------------------------------------------------
 
 
-def kontrollpunkte(abschnitte: int = TORE) -> list[float]:
+def kontrollpunkte(abschnitte: int = TORE,
+                   bauart: Bauart = KURZ) -> list[float]:
     """Die y-Linien der Kontrollpunkte. Immer UNTER dem jeweiligen Tor."""
-    return [ERSTER_ABSCHNITT + k * ABSCHNITT + KONTROLLPUNKT
+    return [ERSTER_ABSCHNITT + k * bauart.abschnitt + bauart.kontrollpunkt
             for k in range(abschnitte)]
 
 
-def build_track(seed: int, tore: int = TORE) -> physics.Track:
+def startplaetze(anzahl: int, bauart: Bauart = KURZ) -> list[tuple[float, float]]:
+    """Startplaetze, in Reihen, wenn eine nicht reicht.
+
+    ALLE einer Reihe auf gleicher Hoehe – im Prototyp standen sie diagonal
+    ueber 312 px gestaffelt, und der unterste Platz erreichte die erste
+    Rampe rund 7,6 Bilder frueher. Bei mehreren Reihen bleibt ein Rest
+    davon: die untere Reihe faellt frueher los. Anders geht es nicht, wenn
+    sechzehn Kugeln in einen 640-px-Schacht sollen – aber die Zuordnung
+    Teilnehmer zu Platz wird ohnehin je Seed ausgelost (`simulate`), ein
+    Reihenvorteil trifft also keine Farbe systematisch.
+    """
+    mitte = theme.WIDTH / 2
+    innen = bauart.breite - 2 * (SEG_RADIUS + theme.MARBLE_RADIUS)
+    je_reihe = max(1, int(innen // bauart.start_abstand) + 1)
+    je_reihe = min(je_reihe, anzahl)
+
+    plaetze = []
+    for i in range(anzahl):
+        reihe, spalte = divmod(i, je_reihe)
+        plaetze.append((mitte + (spalte - (je_reihe - 1) / 2) * bauart.start_abstand,
+                        START_Y - reihe * (MARBLE_D + 8)))
+    return plaetze
+
+
+def build_track(seed: int, tore: int = TORE, bauart: Bauart = KURZ,
+                teilnehmer: int | None = None) -> physics.Track:
     """Die Strecke einer Runde. Gleicher Seed, gleiche Strecke."""
+    bauart.pruefen()
     rng = random.Random(seed * 97 + 11)
     segments: list[physics.Segment] = []
     pegs: list[physics.Peg] = []
     mitte = theme.WIDTH / 2
+    WALL_LEFT, WALL_RIGHT = bauart.wand_links, bauart.wand_rechts
 
-    punkte = kontrollpunkte(tore)
+    punkte = kontrollpunkte(tore, bauart)
     finish_y = punkte[-1] + 520.0
 
-    wand_links = physics.Segment(WALL_LEFT, 0, WALL_LEFT, finish_y + 200,
-                                 SEG_RADIUS)
-    wand_rechts = physics.Segment(WALL_RIGHT, 0, WALL_RIGHT, finish_y + 200,
-                                  SEG_RADIUS)
+    if teilnehmer is None:
+        teilnehmer = len(theme.competitors())
+    starts = startplaetze(teilnehmer, bauart)
+
+    # Die Waende muessen ueber den obersten Startplatz reichen. Bei einer
+    # Reihe ist das wie frueher y=0; bei mehreren steht die oberste hoeher.
+    #
+    # ACHTUNG, hier steht bewusst die GANZE Zahl 0 und nicht 0.0. Der
+    # Geometrie-Fingerabdruck im Rundenarchiv hasht die Streckenwerte als
+    # JSON, und dort ist `0` ein anderer Text als `0.0` – gleiche Zahl,
+    # anderer Hash. Mit 0.0 meldete `--pruefen` fuer JEDE ausgestrahlte
+    # Folge „die Strecke hat sich seither geaendert", obwohl sich kein
+    # einziger Wert geaendert hatte. Gemessen und behoben am 30.07.2026;
+    # ein Test haelt es fest.
+    oberster = min(y for _, y in starts)
+    wand_oben = 0 if oberster >= START_Y else oberster - MARBLE_D - 40
+
+    wand_links = physics.Segment(WALL_LEFT, wand_oben, WALL_LEFT,
+                                 finish_y + 200, SEG_RADIUS)
+    wand_rechts = physics.Segment(WALL_RIGHT, wand_oben, WALL_RIGHT,
+                                  finish_y + 200, SEG_RADIUS)
 
     # Die Rutschen wechseln die Richtung, und ob sie links oder rechts
     # anfangen, entscheidet der Seed – sonst begaenstigt eine feste
@@ -277,14 +514,14 @@ def build_track(seed: int, tore: int = TORE) -> physics.Track:
     stift_baender: list[tuple[float, float]] = []
 
     for k in range(tore):
-        oben = ERSTER_ABSCHNITT + k * ABSCHNITT
+        oben = ERSTER_ABSCHNITT + k * bauart.abschnitt
 
         # --- Rutschen: die eigentliche Bremse ----------------------------
-        for r in range(RUTSCHEN_JE_ABSCHNITT):
+        for r in range(bauart.rutschen):
             laenge = rng.uniform(*RUTSCHE_LAENGE)
             gefaelle = min(laenge * rng.uniform(*RUTSCHE_NEIGUNG),
-                           RUTSCHE_DROP_MAX)
-            nach_rechts = ((k * RUTSCHEN_JE_ABSCHNITT + r) % 2 == 0) != gespiegelt
+                           bauart.rutsche_drop_max)
+            nach_rechts = ((k * bauart.rutschen + r) % 2 == 0) != gespiegelt
             if nach_rechts:
                 x_von = WALL_LEFT + 20
                 x_bis = min(WALL_RIGHT - SEG_RADIUS - RUTSCHE_ENDE_WEITE
@@ -293,7 +530,7 @@ def build_track(seed: int, tore: int = TORE) -> physics.Track:
                 x_von = WALL_RIGHT - 20
                 x_bis = max(WALL_LEFT + SEG_RADIUS + RUTSCHE_ENDE_WEITE
                             + SEG_RADIUS, x_von - laenge)
-            y = oben + RUTSCHE_OBEN + r * RUTSCHE_ABSTAND
+            y = oben + RUTSCHE_OBEN + r * bauart.rutsche_abstand
             segments.append(physics.Segment(x_von, y, x_bis, y + gefaelle,
                                             SEG_RADIUS))
 
@@ -303,14 +540,14 @@ def build_track(seed: int, tore: int = TORE) -> physics.Track:
         tor_links = mitte + versatz - TOR_WEITE / 2
         tor_rechts = mitte + versatz + TOR_WEITE / 2
         segments.append(physics.Segment(
-            WALL_LEFT + 20, oben + TRICHTER_OBEN,
-            tor_links, oben + TRICHTER_OBEN + TRICHTER_HOEHE, SEG_RADIUS))
+            WALL_LEFT + 20, oben + bauart.trichter_oben,
+            tor_links, oben + bauart.trichter_oben + TRICHTER_HOEHE, SEG_RADIUS))
         segments.append(physics.Segment(
-            WALL_RIGHT - 20, oben + TRICHTER_OBEN,
-            tor_rechts, oben + TRICHTER_OBEN + TRICHTER_HOEHE, SEG_RADIUS))
+            WALL_RIGHT - 20, oben + bauart.trichter_oben,
+            tor_rechts, oben + bauart.trichter_oben + TRICHTER_HOEHE, SEG_RADIUS))
 
-        stift_baender.append((oben + STIFTE_OBEN,
-                              oben + STIFTE_OBEN
+        stift_baender.append((oben + bauart.stifte_oben,
+                              oben + bauart.stifte_oben
                               + (STIFT_REIHEN - 1) * STIFT_REIHEN_ABSTAND))
 
     # Auslauf hinter dem letzten Tor
@@ -322,13 +559,13 @@ def build_track(seed: int, tore: int = TORE) -> physics.Track:
     # --- Stifte, jeder gegen alles bisherige geprueft --------------------
     links = WALL_LEFT + SEG_RADIUS + CLEARANCE + PEG_RADIUS
     rechts = WALL_RIGHT - SEG_RADIUS - CLEARANCE - PEG_RADIUS
-    schritt = (rechts - links) / (STIFT_JE_REIHE - 1)
+    schritt = (rechts - links) / (bauart.stift_je_reihe - 1)
     for band_oben, _ in stift_baender:
         phase = rng.uniform(-schritt / 2, schritt / 2)
         for reihe in range(STIFT_REIHEN):
             y = band_oben + reihe * STIFT_REIHEN_ABSTAND
             zeilenversatz = schritt / 2 if reihe % 2 else 0.0
-            for n in range(-1, STIFT_JE_REIHE + 1):
+            for n in range(-1, bauart.stift_je_reihe + 1):
                 x = links + phase + zeilenversatz + n * schritt
                 if not links <= x <= rechts:
                     continue
@@ -337,9 +574,6 @@ def build_track(seed: int, tore: int = TORE) -> physics.Track:
                 if physics.passt_durch(px, py, PEG_RADIUS,
                                        segments, pegs, CLEARANCE):
                     pegs.append(physics.Peg(px, py, PEG_RADIUS))
-
-    starts = [(mitte + (i - 2) * START_SPACING, START_Y)
-              for i in range(len(theme.competitors()))]
 
     return physics.Track(segments=segments, pegs=pegs, starts=starts,
                          finish_y=finish_y, name=f"{NAME}-{tore}")
@@ -351,8 +585,9 @@ def build_track(seed: int, tore: int = TORE) -> physics.Track:
 SEGMENTE_JE_ABSCHNITT = RUTSCHEN_JE_ABSCHNITT + 2
 
 
-def tor_paare(track: physics.Track,
-              tore: int = TORE) -> list[tuple[physics.Segment, physics.Segment]]:
+def tor_paare(track: physics.Track, tore: int = TORE,
+              bauart: Bauart = KURZ
+              ) -> list[tuple[physics.Segment, physics.Segment]]:
     """Die beiden Trichterhaelften je Abschnitt.
 
     Sie werden ueber ihre Position in der Liste geholt, nicht geraten. Der
@@ -364,7 +599,7 @@ def tor_paare(track: physics.Track,
     """
     paare = []
     for k in range(tore):
-        basis = k * SEGMENTE_JE_ABSCHNITT + RUTSCHEN_JE_ABSCHNITT
+        basis = k * bauart.segmente_je_abschnitt + bauart.rutschen
         if basis + 1 >= len(track.segments):
             break
         paare.append((track.segments[basis], track.segments[basis + 1]))
@@ -373,12 +608,13 @@ def tor_paare(track: physics.Track,
 
 def pruefe_durchlaesse(track: physics.Track,
                        clearance: float = MIN_GAP,
-                       tore: int = TORE) -> list[str]:
+                       tore: int = TORE,
+                       bauart: Bauart = KURZ) -> list[str]:
     """Engstellen, in denen sich eine Kugel verkeilen kann."""
     maengel = physics.engstellen(track, clearance)
 
     # Das Tor selbst: es MUSS eng sein, aber nie enger als eine Kugel.
-    for nummer, (a, b) in enumerate(tor_paare(track, tore), start=1):
+    for nummer, (a, b) in enumerate(tor_paare(track, tore, bauart), start=1):
         if a.y2 != b.y2:
             maengel.append(
                 f"Tor {nummer}: die Trichterhaelften enden nicht auf gleicher "
@@ -397,23 +633,48 @@ def pruefe_durchlaesse(track: physics.Track,
 # ---------------------------------------------------------------------------
 
 
-def regel_kennung(seed: int, tore: int = TORE) -> str:
+def regel_kennung(seed: int, tore: int = TORE, bauart: Bauart = KURZ) -> str:
     """Fingerabdruck der Siegbedingung – fuer den Zwischenspeicher in B5.
 
     Die Kontrollpunkte gehoeren dazu: verschiebt sich einer, ist es ein
-    anderes Rennen, auch wenn die Strecke gleich aussieht.
+    anderes Rennen, auch wenn die Strecke gleich aussieht. Eine andere
+    Bauart verschiebt sie zwangslaeufig – der Fingerabdruck faellt damit
+    von selbst auseinander, ohne dass die Bauart eigens hineingeschrieben
+    werden muesste.
     """
-    punkte = ",".join(f"{p:.3f}" for p in kontrollpunkte(tore))
+    punkte = ",".join(f"{p:.3f}" for p in kontrollpunkte(tore, bauart))
     return f"{Elimination.name}:{punkte}"
 
 
-def run(seed: int, tore: int = TORE) -> physics.RunResult:
+#: Zeitbudget je Tor fuer die Notbremse. Gemessen liegt ein Tor bei 5 bis
+#: 9 Sekunden; das Dreifache ist grosszuegig genug, dass kein brauchbarer
+#: Lauf abgeschnitten wird, und eng genug, dass ein verklemmter Lauf nicht
+#: minutenlang weiterrechnet.
+NOTBREMSE_JE_TOR = 18.0
+
+
+def notbremse(tore: int) -> float:
+    """Wie lange ein Lauf hoechstens rechnen darf.
+
+    Die Vorgabe in `physics.simulate` sind 60 Sekunden – ausgelegt auf vier
+    Tore. Bei fuenfzehn schneidet sie den Lauf mitten durch: gemessen am
+    30.07.2026 endeten die ersten Show-Laeufe mit 6 von 15 Ausscheidungen
+    und niemandem im Ziel, und nichts daran sah nach einem Fehler aus.
+    """
+    return max(physics.MAX_SECONDS, tore * NOTBREMSE_JE_TOR)
+
+
+def run(seed: int, tore: int = TORE, bauart: Bauart = KURZ,
+        teilnehmer: int | None = None) -> physics.RunResult:
     """Einen Lauf rechnen."""
-    track = build_track(seed, tore)
-    punkte = kontrollpunkte(tore)
+    if teilnehmer is None:
+        teilnehmer = len(theme.competitors())
+    track = build_track(seed, tore, bauart, teilnehmer)
+    punkte = kontrollpunkte(tore, bauart)
     return physics.simulate(track, seed,
                             regel=Elimination(punkte, track.finish_y),
-                            marks=punkte,
+                            marks=punkte, count=teilnehmer,
+                            max_seconds=notbremse(tore),
                             extras={"mark_label": "GATE"})
 
 

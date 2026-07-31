@@ -64,24 +64,86 @@ KIND_MARBLE, KIND_WALL, KIND_PEG = 1, 2, 3
 # ---------------------------------------------------------------------------
 
 
+#: Rueckgabe eines Elements ohne eigene Angabe. `None` heisst „nimm den
+#: Hauswert" – WALL_ELASTICITY beziehungsweise PEG_ELASTICITY.
+#:
+#: Warum ueberhaupt je Element: eine Kammer, die sich in zwei Sekunden
+#: leert, hat keinen Spannungsbogen. Ein Prellbock wirft die Kugeln
+#: zurueck, statt sie durchzulassen – er haelt das Feld in der Kammer und
+#: erzeugt dabei Aufpraelle, statt sie zu verhindern. Ein Brett, das
+#: dasselbe versuchte, hat das Feld nur aufgefangen und Kugeln
+#: durchgedrueckt (gemessen, 19 von 64 verloren).
+STANDARD_ELASTIZITAET = None
+
+
 @dataclass(frozen=True)
 class Segment:
-    """Ein gerades Streckenstueck (Rampe, Wand, Trichter)."""
+    """Ein gerades Streckenstueck (Rampe, Wand, Trichter, Trampolin)."""
 
     x1: float
     y1: float
     x2: float
     y2: float
     radius: float = 9.0
+    #: Ueber 1.0 gibt das Element MEHR Energie zurueck, als ankam.
+    elastizitaet: float | None = STANDARD_ELASTIZITAET
 
 
 @dataclass(frozen=True)
 class Peg:
-    """Ein runder Umlenkstift."""
+    """Ein runder Umlenkstift oder Prellbock."""
 
     x: float
     y: float
     radius: float = 14.0
+    elastizitaet: float | None = STANDARD_ELASTIZITAET
+
+
+@dataclass(frozen=True)
+class Rotor:
+    """Ein staendig drehendes Kreuz – das erste BEWEGTE Bauteil.
+
+    Bis zum 31.07.2026 war jede Geometrie statisch, und genau daran ist die
+    erste Langform gescheitert: der Pulk verkeilt sich ueber dem Trichter
+    und bleibt liegen. Gemessen an SHOW-01: **86 % der Laufzeit bewegten
+    sich weniger als zehn Prozent der Kugeln**, 19,4 von 22,8 Minuten
+    Stillstand. Die Ausscheidungen kamen nur noch von der Raeumzeit; der
+    Lauf vollendete sich, waehrend das Bild stand.
+
+    Ein Rotor haelt den Haufen in Bewegung und schiebt ihn durch die
+    Engstelle, statt darauf zu warten, dass die Schwerkraft es tut.
+
+    DETERMINISTISCH bleibt es: ein kinematischer Koerper mit fester
+    Winkelgeschwindigkeit hat zum Zeitpunkt t den Winkel `winkel0 + omega*t`
+    – keine neue Zufallsquelle, kein Freiheitsgrad, den der Loeser
+    entscheidet.
+    """
+
+    x: float
+    y: float
+    #: Halbe Laenge eines Fluegels.
+    laenge: float
+    #: Umdrehungen je Sekunde. Vorzeichen = Drehrichtung.
+    drehzahl: float = 0.35
+    fluegel: int = 3
+    radius: float = 12.0
+    winkel0: float = 0.0
+
+    @property
+    def omega(self) -> float:
+        return self.drehzahl * 2 * math.pi
+
+    def winkel(self, t: float) -> float:
+        return self.winkel0 + self.omega * t
+
+    def enden(self, t: float) -> list[tuple[float, float]]:
+        """Die Spitzen der Fluegel zur Zeit t – zum Zeichnen."""
+        w = self.winkel(t)
+        return [(self.x + math.cos(w + k * 2 * math.pi / self.fluegel)
+                 * self.laenge,
+                 self.y + math.sin(w + k * 2 * math.pi / self.fluegel)
+                 * self.laenge)
+                for k in range(self.fluegel)]
 
 
 @dataclass
@@ -93,6 +155,21 @@ class Track:
     starts: list[tuple[float, float]]
     finish_y: float
     name: str = "track"
+    #: SPERREN, die eine Regel oeffnen kann. Je Eintrag eine Gruppe von
+    #: Segmenten, die gemeinsam verschwinden.
+    #:
+    #: Bis zum 30.07.2026 war jede Geometrie statisch. Damit ist die Dauer
+    #: eines Abschnitts nicht steuerbar: eine Kammer dauert so lange, wie
+    #: ihr Feld zum Abfliessen braucht – bei vier Kugeln unter einer
+    #: Sekunde. Der Spannungsbogen laeuft dadurch RUECKWAERTS, es wird zum
+    #: Ende hin immer schneller und belangloser.
+    #:
+    #: Mit einer Sperre bestimmt die Regel die Dauer: das Feld wird
+    #: eingesperrt, und das Tor geht auf, wann sie es will. Deterministisch
+    #: bleibt es, weil die Regel nur an der Simulationszeit haengt.
+    tore: list[list[Segment]] = field(default_factory=list)
+    #: Staendig drehende Kreuze. Halten den Pulk in Bewegung.
+    rotoren: list[Rotor] = field(default_factory=list)
 
     def bounds(self) -> tuple[float, float]:
         """Oberste und unterste Weltkoordinate."""
@@ -206,6 +283,15 @@ class Regel:
         """
         return set()
 
+    def offene_tore(self) -> set[int]:
+        """Welche Sperren aus `Track.tore` inzwischen offen sind.
+
+        Wird nach jedem Rechenschritt abgefragt. Ein Tor, das einmal offen
+        ist, bleibt offen – zurueckbauen kann `simulate` nicht, und eine
+        Sperre, die sich schliesst, wuerde eine Kugel einklemmen.
+        """
+        return set()
+
     def erledigt(self) -> bool:
         """Steht das Ergebnis fest?"""
         return len(self.zielzeiten) >= self.count
@@ -288,6 +374,12 @@ class RunResult:
     #: Waagrechte Linien, die die Disziplin sichtbar machen will
     #: (Kontrollpunkte der Eliminierung). Rein zum Zeichnen.
     marks: list[float] = field(default_factory=list)
+    #: Die Rotoren samt Drehzahl – `draw` rechnet ihren Winkel selbst aus.
+    rotoren: list[Rotor] = field(default_factory=list)
+    #: Die Sperren samt Geometrie – ohne sie kann `draw` sie nicht
+    #: zeichnen, und ein Video zeigte Kugeln, die an nichts haengenbleiben.
+    #: Wann sie aufgingen, steht in `extras["tore_auf"]`.
+    tore: list[list[Segment]] = field(default_factory=list)
     #: Was eine Disziplin sonst noch ins Bild bringen will – bei der
     #: Streuung die Landefaecher samt Punktwert. Absichtlich EIN
     #: allgemeines Feld statt eines je Disziplin: bei acht Disziplinen
@@ -342,6 +434,19 @@ class SimulationError(RuntimeError):
 # ---------------------------------------------------------------------------
 
 
+#: Loeserschritte je Zeitschritt. pymunks Vorgabe ist 10, und dabei bleibt
+#: es fuer alles, was bis B8 gebaut wurde – jede andere Zahl ergaebe andere
+#: Rennen und damit andere Sieger in bereits ausgestrahlten Folgen.
+#:
+#: Die Arena braucht mehr: dort liegen bis zu 64 Kugeln als Haufen vor einem
+#: Ausgang, und der Loeser muss den Stapel in einem Schritt aufloesen.
+#: Reicht er nicht, wandern Kugeln IN die Wand und werden im naechsten
+#: Schritt hinausgeschleudert – gemessen am 30.07.2026 mit Endpositionen
+#: von y = 87 000 000. Ein Lauf sieht dabei nicht kaputt aus, er hat nur
+#: ploetzlich weniger Teilnehmer.
+SOLVER_ITERATIONEN = 10
+
+
 def simulate(track: Track, seed: int, *, fps: int = theme.FPS,
              max_seconds: float = MAX_SECONDS,
              tail_seconds: float = 1.6,
@@ -349,6 +454,7 @@ def simulate(track: Track, seed: int, *, fps: int = theme.FPS,
              count: int | None = None,
              regel: Regel | None = None,
              marks: list[float] | None = None,
+             iterationen: int = SOLVER_ITERATIONEN,
              extras: dict | None = None) -> RunResult:
     """Rechnet einen kompletten Lauf.
 
@@ -370,16 +476,59 @@ def simulate(track: Track, seed: int, *, fps: int = theme.FPS,
     rng = random.Random(seed)
     space = pymunk.Space()
     space.gravity = (0.0, GRAVITY)
+    # Nur setzen, wenn abgewichen wird: `space.iterations` zu schreiben
+    # aendert nichts am Ergebnis, solange der Wert derselbe ist – aber die
+    # Absicht steht so im Code, und der Vorgabepfad bleibt unberuehrt.
+    if iterationen != SOLVER_ITERATIONEN:
+        space.iterations = iterationen
 
     static = space.static_body
     for s in track.segments:
         shape = pymunk.Segment(static, (s.x1, s.y1), (s.x2, s.y2), s.radius)
-        shape.elasticity, shape.friction = WALL_ELASTICITY, WALL_FRICTION
+        shape.elasticity = (WALL_ELASTICITY if s.elastizitaet is None
+                            else s.elastizitaet)
+        shape.friction = WALL_FRICTION
         shape.collision_type = KIND_WALL
         space.add(shape)
+    # Sperren: dieselben Segmente, nur einzeln greifbar, damit die Regel
+    # sie spaeter entfernen kann.
+    tor_shapes: list[list[pymunk.Shape]] = []
+    for gruppe in track.tore:
+        dieses: list[pymunk.Shape] = []
+        for s in gruppe:
+            shape = pymunk.Segment(static, (s.x1, s.y1), (s.x2, s.y2), s.radius)
+            shape.elasticity = (WALL_ELASTICITY if s.elastizitaet is None
+                                else s.elastizitaet)
+            shape.friction = WALL_FRICTION
+            shape.collision_type = KIND_WALL
+            space.add(shape)
+            dieses.append(shape)
+        tor_shapes.append(dieses)
+    schon_offen: set[int] = set()
+    tore_auf: dict[int, float] = {}
+
+    # Rotoren: kinematische Koerper. Sie werden von der Simulation bewegt,
+    # aber nicht von ihr beeinflusst - Kugeln koennen sie nicht bremsen.
+    for rot in track.rotoren:
+        koerper = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+        koerper.position = (rot.x, rot.y)
+        koerper.angle = rot.winkel0
+        koerper.angular_velocity = rot.omega
+        # Koerper VOR den Formen in den Raum - pymunk verlangt das.
+        space.add(koerper)
+        for k in range(rot.fluegel):
+            a = k * 2 * math.pi / rot.fluegel
+            spitze = (math.cos(a) * rot.laenge, math.sin(a) * rot.laenge)
+            fluegel = pymunk.Segment(koerper, (0.0, 0.0), spitze, rot.radius)
+            fluegel.elasticity, fluegel.friction = WALL_ELASTICITY, WALL_FRICTION
+            fluegel.collision_type = KIND_WALL
+            space.add(fluegel)
+
     for p in track.pegs:
         shape = pymunk.Circle(static, p.radius, (p.x, p.y))
-        shape.elasticity, shape.friction = PEG_ELASTICITY, PEG_FRICTION
+        shape.elasticity = (PEG_ELASTICITY if p.elastizitaet is None
+                            else p.elastizitaet)
+        shape.friction = PEG_FRICTION
         shape.collision_type = KIND_PEG
         space.add(shape)
 
@@ -479,6 +628,19 @@ def simulate(track: Track, seed: int, *, fps: int = theme.FPS,
                 if shapes[i] in space.shapes:
                     space.remove(shapes[i], bodies[i])
 
+            # Sperren, die die Regel inzwischen freigegeben hat.
+            if tor_shapes:
+                for k in regel.offene_tore() - schon_offen:
+                    if not 0 <= k < len(tor_shapes):
+                        raise SimulationError(
+                            f"Regel {regel.name!r} oeffnet Tor {k}, die "
+                            f"Strecke hat {len(tor_shapes)}")
+                    for sh in tor_shapes[k]:
+                        if sh in space.shapes:
+                            space.remove(sh)
+                    schon_offen.add(k)
+                    tore_auf[k] = zeit_von + dt
+
         frames.append([
             (round(b.position.x, 1), round(b.position.y, 1), round(b.angle, 3))
             for b in bodies
@@ -556,7 +718,14 @@ def simulate(track: Track, seed: int, *, fps: int = theme.FPS,
         finish_y=track.finish_y,
         eliminated=dict(regel.ausgeschieden),
         marks=list(marks or []),
-        extras=dict(extras or {}),
+        tore=[list(g) for g in track.tore],
+        rotoren=list(track.rotoren),
+        # Wann welche Sperre aufging – `draw` muss sie danach weglassen,
+        # sonst steht im Bild eine Wand, durch die die Kugeln rollen.
+        extras={**dict(extras or {}),
+                **({"tore_auf": {str(k): round(t, 3)
+                                 for k, t in tore_auf.items()}}
+                   if tor_shapes else {})},
     )
 
 
@@ -669,6 +838,8 @@ def to_dict(r: RunResult) -> dict:
     d = asdict(r)
     d["hits"] = [asdict(h) for h in r.hits]
     d["segments"] = [asdict(s) for s in r.segments]
+    d["tore"] = [[asdict(s) for s in gruppe] for gruppe in r.tore]
+    d["rotoren"] = [asdict(x) for x in r.rotoren]
     d["pegs"] = [asdict(p) for p in r.pegs]
     d["finish_times"] = {str(k): v for k, v in r.finish_times.items()}
     d["eliminated"] = {str(k): v for k, v in r.eliminated.items()}
@@ -692,6 +863,8 @@ def from_dict(d: dict) -> RunResult:
         # Mit Standardwerten – aeltere state.json kennen die Felder nicht.
         eliminated={int(k): v for k, v in (d.get("eliminated") or {}).items()},
         marks=list(d.get("marks") or []),
+        tore=[[Segment(**s) for s in gruppe] for gruppe in (d.get("tore") or [])],
+        rotoren=[Rotor(**x) for x in (d.get("rotoren") or [])],
         extras=dict(d.get("extras") or {}),
     )
 

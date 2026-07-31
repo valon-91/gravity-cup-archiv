@@ -211,6 +211,53 @@ class Canvas:
             x += kachel
             i += 1
 
+    def muster(self, comp: theme.Competitor, cx: float, cy: float, r: float,
+               angle: float, ein) -> None:
+        """Das Muster auf der Kugel, in Ausgabe-Koordinaten.
+
+        Warum es das gibt: 64 unterscheidbare FARBEN gibt es nicht – die
+        Stammbesetzung hat unter Rot-Gruen-Schwaeche schon bei fuenf ein
+        engstes Paar von 61,7, und ab sechzehn wird es eng. Mit Muster
+        reichen sechzehn Farben fuer ueber hundert Kennungen.
+
+        Die Muster DREHEN SICH MIT. Die Rotationsmarke gibt es seit B1,
+        weil sichtbar sein soll, dass wirklich gerollt wird; ein
+        aufgeklebtes Muster wuerde dem widersprechen.
+        """
+        if comp.muster == "voll":
+            return
+        f = ein(comp.color2)
+        kasten = [cx - r, cy - r, cx + r, cy + r]
+        grad = math.degrees(angle)
+
+        if comp.muster == "ring":
+            breite = max(1, int(r * 0.20))
+            rr = r * 0.66
+            self.draw.ellipse([cx - rr, cy - rr, cx + rr, cy + rr],
+                              outline=f, width=breite)
+        elif comp.muster == "halb":
+            self.draw.pieslice(kasten, grad, grad + 180, fill=f)
+        elif comp.muster == "keil":
+            self.draw.pieslice(kasten, grad - 46, grad + 46, fill=f)
+        elif comp.muster == "doppelring":
+            breite = max(1, int(r * 0.13))
+            for anteil in (0.80, 0.44):
+                rr = r * anteil
+                self.draw.ellipse([cx - rr, cy - rr, cx + rr, cy + rr],
+                                  outline=f, width=breite)
+        elif comp.muster == "kreuz":
+            for versatz in (0, 180):
+                self.draw.pieslice(kasten, grad + versatz - 22,
+                                   grad + versatz + 22, fill=f)
+        elif comp.muster == "punkt":
+            # Zwei gegenueberliegende Punkte: einer allein waere bei
+            # halber Drehung hinter der Kugel und die Kennung verschwaende.
+            pr = r * 0.30
+            for versatz in (0.0, math.pi):
+                px = cx + math.cos(angle + versatz) * r * 0.48
+                py = cy + math.sin(angle + versatz) * r * 0.48
+                self.draw.ellipse([px - pr, py - pr, px + pr, py + pr], fill=f)
+
     def marble(self, comp: theme.Competitor, x: float, y: float,
                angle: float = 0.0, trail: list[tuple[float, float]] | None = None,
                alpha: int = 255, radius: float | None = None) -> None:
@@ -239,6 +286,7 @@ class Canvas:
 
         cx, cy = self.wx(x), self.wy(y)
         self.draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=ein(comp.color))
+        self.muster(comp, cx, cy, r, angle, ein)
         self.draw.ellipse([cx - r, cy - r, cx + r, cy + r],
                           outline=ein(comp.dark),
                           width=int(self.s(theme.MARBLE_OUTLINE)))
@@ -254,6 +302,58 @@ class Canvas:
         hx, hy = cx - r * 0.33, cy - r * 0.36
         self.draw.ellipse([hx - hr, hy - hr, hx + hr, hy + hr],
                           fill=ein((255, 255, 255), 122))
+
+    def sperre(self, x1: float, y1: float, x2: float, y2: float,
+               radius: float, alpha: int = 255) -> None:
+        """Eine geschlossene Sperre (Arena).
+
+        Bewusst anders als ein Streckenstueck: die Warnfarbe und eine
+        Schraffur. Der Zuschauer muss auf den ersten Blick sehen, dass DAS
+        gleich aufgeht – sonst wirkt das aufgestaute Feld wie ein Fehler.
+        """
+        if alpha <= 0 or not self.camera.overlaps(y1, y2):
+            return
+        p1 = (self.wx(x1), self.wy(y1))
+        p2 = (self.wx(x2), self.wy(y2))
+        w = self.s(radius * 2)
+        self.draw.line([p1, p2], fill=theme.GATE + (alpha,),
+                       width=int(w), joint="curve")
+        # Schraffur quer zur Sperre
+        laenge = math.hypot(p2[0] - p1[0], p2[1] - p1[1])
+        if laenge < 1:
+            return
+        ux, uy = (p2[0] - p1[0]) / laenge, (p2[1] - p1[1]) / laenge
+        schritt = max(self.s(26), 6)
+        n = int(laenge // schritt)
+        dunkel = tuple(int(c * 0.45) for c in theme.GATE) + (alpha,)
+        for k in range(n + 1):
+            mx = p1[0] + ux * k * schritt
+            my = p1[1] + uy * k * schritt
+            self.draw.line([(mx - uy * w / 2 - ux * w * 0.35,
+                             my + ux * w / 2 - uy * w * 0.35),
+                            (mx - uy * -w / 2 + ux * w * 0.35,
+                             my + ux * -w / 2 + uy * w * 0.35)],
+                           fill=dunkel, width=max(1, int(self.s(3))))
+
+    def rotor(self, rot, zeit: float, alpha: int = 255) -> None:
+        """Ein drehendes Kreuz.
+
+        Bewusst nicht in der Streckenfarbe: der Zuschauer muss sehen, dass
+        sich DAS bewegt und nicht er selbst. Ein Rotor, der aussieht wie
+        eine Wand, wirkt wie ein Bildfehler.
+        """
+        if alpha <= 0 or not self.camera.visible(rot.y):
+            return
+        mx, my = self.wx(rot.x), self.wy(rot.y)
+        w = self.s(rot.radius * 2)
+        for ex, ey in rot.enden(zeit):
+            self.draw.line([(mx, my), (self.wx(ex), self.wy(ey))],
+                           fill=theme.GATE + (alpha,), width=int(w),
+                           joint="curve")
+        nabe = self.s(rot.radius * 1.6)
+        self.draw.ellipse([mx - nabe, my - nabe, mx + nabe, my + nabe],
+                          fill=tuple(int(c * 0.5) for c in theme.GATE)
+                          + (alpha,))
 
     def gate_line(self, y: float, alpha: int = 255,
                   label: str | None = None) -> None:
@@ -331,6 +431,27 @@ class Canvas:
         self.draw.rectangle([0, 0, self.image.width, self.image.height],
                             fill=theme.PANEL + (alpha,))
 
+    @staticmethod
+    def hud_zeilen(order: list[int]) -> list[tuple[int, int | None]]:
+        """Welche Zeilen die Rangliste zeigt: (Rang, Teilnehmer).
+
+        Als eigene Funktion, damit sie ohne Bild pruefbar ist – die
+        Rangliste hat schon zweimal etwas verdeckt, was niemand gemessen
+        hatte.
+
+        `(k, None)` ist die Trennzeile und sagt, wie viele dazwischen
+        ausgelassen sind.
+        """
+        if len(order) <= theme.HUD_MAX_ROWS:
+            return [(r, i) for r, i in enumerate(order)]
+        kopf, fuss = theme.HUD_KOPF, theme.HUD_FUSS
+        ausgelassen = len(order) - kopf - fuss
+        zeilen: list[tuple[int, int | None]] = [
+            (r, order[r]) for r in range(kopf)]
+        zeilen.append((ausgelassen, None))
+        zeilen += [(r, order[r]) for r in range(len(order) - fuss, len(order))]
+        return zeilen
+
     def hud_ranking(self, order: list[int], comps=None,
                     alpha: int = 255, top: float | None = None,
                     raus: set[int] | None = None) -> None:
@@ -347,13 +468,26 @@ class Canvas:
         comps = comps or theme.competitors()
         x = theme.SAFE_LEFT + 4
         y = theme.SAFE_TOP if top is None else top
-        hoehe = theme.HUD_ROW_HEIGHT * len(order) + theme.PANEL_PAD * 2
+
+        # Bei grossem Feld nur Kopf und Fuss zeigen.
+        #
+        # Fuenf Zeilen passen; sechzehn nicht – bei 62 px je Zeile waeren das
+        # 1042 px, mehr als die halbe Bildhoehe, und die Rangliste verdeckt
+        # ohnehin schon Kugeln (bekannter offener Punkt).
+        #
+        # Gezeigt werden die VORDERSTEN und die LETZTEN, nicht die
+        # vordersten allein. Bei der Eliminierung faellt die Entscheidung
+        # hinten: wer als Letzter am Tor ankommt, ist raus. Eine Liste, die
+        # nur die Spitze zeigt, blendet genau das aus, worum es geht.
+        zeilen = self.hud_zeilen(order)
+        hoehe = theme.HUD_ROW_HEIGHT * len(zeilen) + theme.PANEL_PAD * 2
 
         # Breite nach dem laengsten Namen, nicht nach einer festen Zahl:
         # ab Saison 2 kommen die Namen aus den Kommentaren und sind laenger
         # als "VIOLET". Eine feste Breite wuerde sie abschneiden.
         namen_breite = max(
-            (self.measure(comps[i].name, "hud_entry")[0] for i in order),
+            (self.measure(comps[i].name, "hud_entry")[0]
+             for _, i in zeilen if i is not None),
             default=0,
         )
         breite = max(theme.HUD_WIDTH, 108 + namen_breite + 28)
@@ -361,11 +495,19 @@ class Canvas:
         self.panel((x, y, x + breite, y + hoehe),
                    alpha=int(theme.PANEL_ALPHA * alpha / 255))
 
-        for rang, idx in enumerate(order):
+        for zeile, (rang, idx) in enumerate(zeilen):
+            if idx is None:
+                # Trennzeile: wie viele dazwischen ausgelassen sind.
+                zeile_y = (y + theme.PANEL_PAD
+                           + theme.HUD_ROW_HEIGHT * zeile
+                           + theme.HUD_ROW_HEIGHT / 2)
+                self.text(x + 66, zeile_y, f"+{rang}", "hud_entry",
+                          fill=theme.TEXT_MUTED, anchor="lm", alpha=alpha // 2)
+                continue
             comp = comps[idx]
             draussen = idx in raus
             a = alpha // 3 if draussen else alpha
-            zeile_y = y + theme.PANEL_PAD + theme.HUD_ROW_HEIGHT * rang \
+            zeile_y = y + theme.PANEL_PAD + theme.HUD_ROW_HEIGHT * zeile \
                 + theme.HUD_ROW_HEIGHT / 2
             r = theme.HUD_DOT_RADIUS
             cx = x + 34

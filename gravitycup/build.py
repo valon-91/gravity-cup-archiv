@@ -241,12 +241,27 @@ def lauf_fingerabdruck(disziplin, seed: int) -> str:
     # Rennen ergibt – und `check()` merkt nichts, weil sie auf dem alten,
     # in sich gueltigen Lauf laeuft.
     kennung = getattr(disziplin, "regel_kennung", None)
+
+    # Elastizitaet gehoert in den Fingerabdruck – ein Trampolin ergibt ein
+    # anderes Rennen als eine Wand, auch wenn es an derselben Stelle steht.
+    #
+    # Sie steht aber NUR dort, wo sie vom Hauswert abweicht. Wuerde sie
+    # immer mitgeschrieben, aenderte sich der Fingerabdruck jeder bereits
+    # ausgestrahlten Folge, und `--pruefen` meldete fuer alle 19 „die
+    # Strecke hat sich seither geaendert" – ohne dass sich ein einziger
+    # Wert geaendert haette. Dieselbe Falle wie beim Wechsel von `0` auf
+    # `0.0` in der Wandkoordinate, nur teurer.
+    def masse(werte, elast):
+        return list(werte) if elast is None else list(werte) + [elast]
+
     roh = json.dumps({
         "disziplin": disziplin.NAME,
         "regel": kennung(seed) if kennung else disziplin.NAME,
         "seed": seed,
-        "segments": [[s.x1, s.y1, s.x2, s.y2, s.radius] for s in track.segments],
-        "pegs": [[p.x, p.y, p.radius] for p in track.pegs],
+        "segments": [masse([s.x1, s.y1, s.x2, s.y2, s.radius], s.elastizitaet)
+                     for s in track.segments],
+        "pegs": [masse([p.x, p.y, p.radius], p.elastizitaet)
+                 for p in track.pegs],
         "starts": [list(s) for s in track.starts],
         "finish_y": track.finish_y,
         "physik": [physics.GRAVITY, physics.SUBSTEPS, physics.MARBLE_MASS,
@@ -485,6 +500,58 @@ def lauf_holen(disziplin, seed: int, cache: Path | None,
 # ---------------------------------------------------------------------------
 
 
+def kammerkamera(result: physics.RunResult) -> list[float] | None:
+    """Feste Kamera je Kammer – für die Arena.
+
+    Die Verfolgerkamera aus dem Hochformat ist hier schlicht falsch: eine
+    Kammer passt GANZ ins Bild, es gibt nichts zu verfolgen. Eine Kamera,
+    die dem Führenden hinterherläuft, wackelt stattdessen im Takt der
+    Kugeln, und alle anderen wandern durchs Bild, obwohl sich am
+    Bildausschnitt nichts ändern müsste.
+
+    Gewechselt wird, wenn die MEHRHEIT der noch aktiven Kugeln in der
+    nächsten Kammer ist – nicht wenn die erste dort ankommt. Sonst springt
+    das Bild weiter, während der Pulk noch oben steht.
+
+    Liefert `None`, wenn der Lauf keine Kammern hat; dann gilt die normale
+    Kamerafahrt.
+    """
+    kammern = (result.extras or {}).get("kammern")
+    if not kammern:
+        return None
+
+    # Sichtfenster je Kammer: die Kammer mittig, mit Luft für die Rutsche.
+    fenster = []
+    for links, oben, rechts, unten, _ in kammern:
+        mitte_y = (oben + unten) / 2
+        fenster.append(mitte_y - theme.HEIGHT / 2)
+
+    fps = result.fps
+    ziele: list[float] = []
+    aktuell = 0
+    for f, bild in enumerate(result.frames):
+        raus = {i for i, t in result.eliminated.items() if t * fps <= f}
+        aktiv = [p[1] for i, p in enumerate(bild) if i not in raus]
+        if not aktiv:
+            aktiv = [p[1] for p in bild]
+        # Wie viele stehen unterhalb der aktuellen Kammer?
+        while aktuell + 1 < len(kammern):
+            grenze = kammern[aktuell][3]          # unten
+            drunter = sum(1 for y in aktiv if y > grenze)
+            if drunter * 2 <= len(aktiv):
+                break
+            aktuell += 1
+        ziele.append(fenster[aktuell])
+
+    # Weich nachziehen, damit der Wechsel eine Fahrt ist und kein Schnitt.
+    top = ziele[0]
+    tops = []
+    for ziel in ziele:
+        top += (ziel - top) * theme.CAMERA_SMOOTHING
+        tops.append(top)
+    return tops
+
+
 def kamerafahrt(result: physics.RunResult) -> list[float]:
     """Oberkante je Bild, im Voraus gerechnet.
 
@@ -493,6 +560,11 @@ def kamerafahrt(result: physics.RunResult) -> list[float]:
     zu rechnen, bekommt eine springende Kamera. Deshalb steht sie hier als
     reine Liste – danach ist jedes Bild unabhaengig zeichenbar.
     """
+    # Disziplinen mit Kammern bekommen eine feste Kamera je Kammer.
+    fest = kammerkamera(result)
+    if fest is not None:
+        return fest
+
     def aktive(f: int) -> list[float]:
         """Die y-Werte aller Kugeln, die im Bild f noch im Rennen sind.
 
@@ -619,6 +691,27 @@ def zeichne_bild(result: physics.RunResult, f: int, top: float,
         c.track_segment(s.x1, s.y1, s.x2, s.y2)
     for p in result.pegs:
         c.peg(p.x, p.y, p.radius)
+
+    # Sperren, solange sie zu sind.
+    #
+    # Ohne das steht im Video eine Wand, durch die die Kugeln spaeter
+    # rollen – oder, schlimmer, gar keine: dann staut sich das Feld
+    # sichtbar an nichts auf, und der Zuschauer haelt es fuer einen Fehler.
+    # `tore_auf` kommt aus der Simulation und sagt, wann welche aufging.
+    auf = (result.extras or {}).get("tore_auf") or {}
+    for nummer, gruppe in enumerate(result.tore):
+        zeit = auf.get(str(nummer))
+        if zeit is not None and rennbild >= zeit * result.fps:
+            continue
+        for s in gruppe:
+            c.sperre(s.x1, s.y1, s.x2, s.y2, s.radius)
+
+    # Drehkreuze. Ihr Winkel wird gerechnet, nicht gespeichert: ein
+    # kinematischer Koerper mit fester Drehzahl steht zur Zeit t bei
+    # winkel0 + omega*t, und genau das macht ihn deterministisch.
+    for rot in result.rotoren:
+        c.rotor(rot, rennbild / result.fps)
+
     c.finish_line(result.finish_y)
 
     # Waagrechte Marken der Disziplin. Bei der Eliminierung sind das die
@@ -735,6 +828,129 @@ def ffmpeg_befehl(exe: str, wav: Path, ziel: Path, fps: int,
     ]
 
 
+def video_schreiben(exe: str, wav: Path, ziel: Path, fps: int,
+                    crf: int, preset: str, gesamt: int,
+                    bild_fuer, fortschritt: str | None = None) -> dict:
+    """Eine Bildfolge durch ffmpeg schreiben. Liefert die Pruefsummen.
+
+    Herausgeloest aus `bauen()` am 30.07.2026, weil die Show dieselbe
+    Kodierung braucht: `bild_fuer(f)` liefert Bild f, woher auch immer –
+    aus einem Rennen, aus einer Segmentfolge mehrerer Laeufe, oder aus
+    gezeichneten Karten. Die Pipeline war dafuer von Anfang an ausgelegt
+    (eine rohe Bildfolge ueber stdin), nur stand die Schleife fest in
+    `bauen`.
+
+    HIER LAG DER SCHWERSTE FEHLER VON B5: ein abgeschnittenes Video wurde
+    als Erfolg archiviert, weil ffmpeg mit Code 0 endete. Die drei
+    Bedingungen am Ende sind die Abhilfe und stehen wortgleich so, wie sie
+    dort standen. Wer hier vereinfacht, macht den Fehler noch einmal.
+    """
+    ziel.parent.mkdir(parents=True, exist_ok=True)
+    befehl = ffmpeg_befehl(exe, wav, ziel, fps, crf, preset)
+    t0 = time.perf_counter()
+    proc = subprocess.Popen(befehl, stdin=subprocess.PIPE,
+                            stderr=subprocess.PIPE)
+
+    # Die Fehlerausgabe wird NEBENHER mitgelesen.
+    #
+    # Sonst haengt der Aufbau: die Rohbilder sind rund 5 GB, die gehen
+    # Stueck fuer Stueck in ffmpegs Eingang. Schreibt ffmpeg in derselben
+    # Zeit mehr in seine Fehlerausgabe, als die Pipe fasst (unter Windows
+    # einige Kilobyte), blockiert ffmpeg beim Schreiben – und wir
+    # blockieren beim Schreiben an ffmpeg. Beide warten aufeinander, und
+    # zwar fuer immer. `-loglevel error` macht das unwahrscheinlich, aber
+    # eine Warnung je Bild reicht schon.
+    fehler_teile: list[bytes] = []
+
+    def mitlesen():
+        try:
+            fehler_teile.append(proc.stderr.read())
+        except Exception:
+            pass
+
+    leser = threading.Thread(target=mitlesen, daemon=True)
+    leser.start()
+
+    # Pruefsumme der ROHEN Bildfolge, waehrend sie durchlaeuft.
+    #
+    # Das ist die harte Determinismus-Zusage, die der Pruefbericht verlangt:
+    # gleiche Versionen, gleicher Seed -> dieselbe Bildfolge, Bit fuer Bit.
+    # Die MP4 kann das nicht leisten (x264 codiert je nach Threadzahl
+    # anders), die Rohbilder vor dem Codieren schon. Kostet einen
+    # hashlib-Aufruf je Bild.
+    bilder_hash = hashlib.sha256()
+    geschrieben = 0
+    abgerissen = False
+
+    try:
+        for f in range(gesamt):
+            bild = bild_fuer(f)
+            if bild.mode != "RGB":
+                bild = bild.convert("RGB")
+            roh = bild.tobytes()
+            bilder_hash.update(roh)
+            proc.stdin.write(roh)
+            geschrieben += 1
+            if fortschritt and f % 60 == 0:
+                anteil = f / gesamt
+                verstrichen = time.perf_counter() - t0
+                rest = verstrichen / anteil - verstrichen if anteil > 0.02 else 0
+                print(f"\r{fortschritt}    {f:5d}/{gesamt}  "
+                      f"{anteil * 100:3.0f} %   noch ~{rest:5.0f}s",
+                      end="", flush=True)
+    except BrokenPipeError:
+        # ffmpeg ist unterwegs gestorben oder hat frueh dichtgemacht. Der
+        # Grund steht in der Fehlerausgabe, die der Nebenlaeufer schon
+        # eingesammelt hat. Frueher wurde das hier stillschweigend
+        # verschluckt – der Aufbau meldete danach „100 %".
+        abgerissen = True
+    except BaseException:
+        # Alles andere – Zeichenfehler, Strg+C, Speicher voll. ffmpeg wuerde
+        # sonst weiterlaufen und aus den bisherigen Bildern eine abspielbare,
+        # aber unvollstaendige MP4 fertigstellen.
+        proc.kill()
+        proc.wait()
+        ziel.unlink(missing_ok=True)
+        raise
+    finally:
+        try:
+            if proc.stdin and not proc.stdin.closed:
+                proc.stdin.close()
+        except (BrokenPipeError, OSError):
+            pass
+        code = proc.wait()
+        leser.join(timeout=10)
+        try:
+            proc.stderr.close()
+        except Exception:
+            pass
+    fehler = b"".join(t for t in fehler_teile if t).decode("utf-8", "replace")
+
+    # Drei Bedingungen, nicht eine. Ein Rueckgabewert von 0 allein sagt
+    # NICHT, dass das Video vollstaendig ist: schliesst ffmpeg den Eingang
+    # frueher, endet es zufrieden – mit einem Video, in dem das Rennen
+    # fehlt. Eine halbfertige MP4 ist schlimmer als gar keine, weil sie
+    # aussieht wie ein Ergebnis und sich hochladen laesst.
+    if code != 0 or abgerissen or geschrieben != gesamt:
+        ziel.unlink(missing_ok=True)
+        gruende = []
+        if code != 0:
+            # Windows meldet negative Codes als grosse vorzeichenlose Zahl.
+            signiert = code - 2 ** 32 if code > 2 ** 31 else code
+            gruende.append(f"ffmpeg endete mit Code {signiert}")
+        if abgerissen:
+            gruende.append("ffmpeg hat den Bildeingang vorzeitig geschlossen")
+        if geschrieben != gesamt:
+            gruende.append(f"nur {geschrieben} von {gesamt} Bildern angenommen")
+        raise SystemExit(
+            "ABBRUCH beim Zusammensetzen – keine Datei geschrieben:\n"
+            + "\n".join(f"  - {g}" for g in gruende)
+            + (f"\n\nffmpeg meldet:\n{fehler}" if fehler.strip() else "")
+        )
+    return {"bildfolge": bilder_hash.hexdigest(), "bilder": geschrieben,
+            "sekunden": time.perf_counter() - t0}
+
+
 def bauen(disziplin, seed: int, ziel: Path, *, scale: int | None = None,
           runde: str | None = None, cache_nutzen: bool = True,
           neu: bool = False, trotzdem: bool = False,
@@ -825,115 +1041,20 @@ def bauen(disziplin, seed: int, ziel: Path, *, scale: int | None = None,
     punkte = standings.punkte_je_platz()
     marke = _rundenmarke(runde)
 
-    ziel.parent.mkdir(parents=True, exist_ok=True)
-    befehl = ffmpeg_befehl(exe, wav, ziel, fps, crf, preset)
-    t0 = time.perf_counter()
-    proc = subprocess.Popen(befehl, stdin=subprocess.PIPE,
-                            stderr=subprocess.PIPE)
-
-    # Die Fehlerausgabe wird NEBENHER mitgelesen.
-    #
-    # Sonst haengt der Aufbau: die Rohbilder sind rund 5 GB, die gehen
-    # Stueck fuer Stueck in ffmpegs Eingang. Schreibt ffmpeg in derselben
-    # Zeit mehr in seine Fehlerausgabe, als die Pipe fasst (unter Windows
-    # einige Kilobyte), blockiert ffmpeg beim Schreiben – und wir
-    # blockieren beim Schreiben an ffmpeg. Beide warten aufeinander, und
-    # zwar fuer immer. `-loglevel error` macht das unwahrscheinlich, aber
-    # eine Warnung je Bild reicht schon.
-    fehler_teile: list[bytes] = []
-
-    def mitlesen():
-        try:
-            fehler_teile.append(proc.stderr.read())
-        except Exception:
-            pass
-
-    leser = threading.Thread(target=mitlesen, daemon=True)
-    leser.start()
-
-    # Pruefsumme der ROHEN Bildfolge, waehrend sie durchlaeuft.
-    #
-    # Das ist die harte Determinismus-Zusage, die der Pruefbericht verlangt:
-    # gleiche Versionen, gleicher Seed -> dieselbe Bildfolge, Bit fuer Bit.
-    # Die MP4 kann das nicht leisten (x264 codiert je nach Threadzahl
-    # anders), die Rohbilder vor dem Codieren schon. Kostet einen
-    # hashlib-Aufruf je Bild.
-    bilder_hash = hashlib.sha256()
-    geschrieben = 0
-    abgerissen = False
-
     try:
-        for f in range(gesamt):
-            top = tops[min(f, len(tops) - 1)]
-            bild = zeichne_bild(result, f, top, hook, scale, karte_start,
-                                runde=marke, punkte=punkte, seed=seed)
-            if bild.mode != "RGB":
-                bild = bild.convert("RGB")
-            roh = bild.tobytes()
-            bilder_hash.update(roh)
-            proc.stdin.write(roh)
-            geschrieben += 1
-            if not leise and f % 60 == 0:
-                anteil = f / gesamt
-                verstrichen = time.perf_counter() - t0
-                rest = verstrichen / anteil - verstrichen if anteil > 0.02 else 0
-                print(f"\r[4/5] Bilder    {f:4d}/{gesamt}  {anteil * 100:3.0f} %"
-                      f"   noch ~{rest:4.0f}s", end="", flush=True)
-    except BrokenPipeError:
-        # ffmpeg ist unterwegs gestorben oder hat frueh dichtgemacht. Der
-        # Grund steht in der Fehlerausgabe, die der Nebenlaeufer schon
-        # eingesammelt hat. Frueher wurde das hier stillschweigend
-        # verschluckt – der Aufbau meldete danach „100 %".
-        abgerissen = True
+        messung = video_schreiben(
+            exe, wav, ziel, fps, crf, preset, gesamt,
+            lambda f: zeichne_bild(result, f, tops[min(f, len(tops) - 1)],
+                                   hook, scale, karte_start,
+                                   runde=marke, punkte=punkte, seed=seed),
+            fortschritt=None if leise else "[4/5] Bilder")
     except BaseException:
-        # Alles andere – Zeichenfehler, Strg+C, Speicher voll. ffmpeg wuerde
-        # sonst weiterlaufen und aus den bisherigen Bildern eine abspielbare,
-        # aber unvollstaendige MP4 fertigstellen.
-        proc.kill()
-        proc.wait()
-        ziel.unlink(missing_ok=True)
         if aufraeumen is not None:
             aufraeumen.cleanup()
         raise
-    finally:
-        try:
-            if proc.stdin and not proc.stdin.closed:
-                proc.stdin.close()
-        except (BrokenPipeError, OSError):
-            pass
-        code = proc.wait()
-        leser.join(timeout=10)
-        try:
-            proc.stderr.close()
-        except Exception:
-            pass
-    fehler = b"".join(t for t in fehler_teile if t).decode("utf-8", "replace")
-
-    # Drei Bedingungen, nicht eine. Ein Rueckgabewert von 0 allein sagt
-    # NICHT, dass das Video vollstaendig ist: schliesst ffmpeg den Eingang
-    # frueher, endet es zufrieden – mit einem Video, in dem das Rennen
-    # fehlt. Eine halbfertige MP4 ist schlimmer als gar keine, weil sie
-    # aussieht wie ein Ergebnis und sich hochladen laesst.
-    if code != 0 or abgerissen or geschrieben != gesamt:
-        ziel.unlink(missing_ok=True)
-        if aufraeumen is not None:
-            aufraeumen.cleanup()
-        gruende = []
-        if code != 0:
-            # Windows meldet negative Codes als grosse vorzeichenlose Zahl.
-            signiert = code - 2 ** 32 if code > 2 ** 31 else code
-            gruende.append(f"ffmpeg endete mit Code {signiert}")
-        if abgerissen:
-            gruende.append("ffmpeg hat den Bildeingang vorzeitig geschlossen")
-        if geschrieben != gesamt:
-            gruende.append(f"nur {geschrieben} von {gesamt} Bildern angenommen")
-        raise SystemExit(
-            "ABBRUCH beim Zusammensetzen – keine Datei geschrieben:\n"
-            + "\n".join(f"  - {g}" for g in gruende)
-            + (f"\n\nffmpeg meldet:\n{fehler}" if fehler.strip() else "")
-        )
+    bilder_hash = messung["bildfolge"]
     sag(f"\r[4/5] Bilder    {gesamt}/{gesamt}  100 %"
-        f"            ({time.perf_counter() - t0:.1f}s)")
+        f"            ({messung['sekunden']:.1f}s)")
 
     # --- 5. Archiv ---------------------------------------------------------
     manifest = {
@@ -986,7 +1107,7 @@ def bauen(disziplin, seed: int, ziel: Path, *, scale: int | None = None,
                 json.dumps(physics.to_dict(result), sort_keys=True).encode()
             ).hexdigest(),
             "state_json": sha256(state_pfad) if state_pfad else None,
-            "bildfolge": bilder_hash.hexdigest(),
+            "bildfolge": bilder_hash,
             "wav": sha256(wav),
             "mp4": sha256(ziel),
             "hinweis": "lauf, bildfolge und wav sind harte Zusagen: gleiche "

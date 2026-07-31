@@ -423,8 +423,23 @@ class TestSichereZone(unittest.TestCase):
         Eine symmetrische Tabelle ragte 104 px darunter, die Punktzahlen
         58 px – ausgerechnet die Spalte, auf die es ankommt.
         """
-        self.assertLessEqual(card.RAND_RECHTS, theme.WIDTH - theme.SAFE_RIGHT)
-        self.assertGreaterEqual(card.RAND, theme.SAFE_LEFT)
+        self.assertLessEqual(card.rand_rechts(), theme.WIDTH - theme.SAFE_RIGHT)
+        self.assertGreaterEqual(card.rand(), theme.SAFE_LEFT)
+
+    def test_tabelle_folgt_dem_ausgabeformat(self):
+        """Die Raender waren bis zum 30.07.2026 Modulkonstanten und froren
+        `theme.WIDTH` beim Import ein. Im Vollbild waere die Tabelle danach
+        weiterhin 1080 px breit gewesen, mit den Raendern des Hochformats.
+        """
+        vorher = theme.FORMAT
+        try:
+            theme.set_format("quer")
+            self.assertLessEqual(card.rand_rechts(),
+                                 theme.WIDTH - theme.SAFE_RIGHT)
+            self.assertGreater(card.rand_rechts(), theme.HOCH.width,
+                               "Tabelle nutzt die Vollbildbreite nicht")
+        finally:
+            theme.set_format(vorher)
 
     def test_tabelle_passt_in_die_hoehe(self):
         hoehe = card.ZEILE * N + theme.PANEL_PAD * 2

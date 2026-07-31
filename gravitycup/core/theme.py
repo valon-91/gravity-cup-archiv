@@ -10,8 +10,9 @@ CLI-Test:  python -m gravitycup.tools.probe_theme
 """
 from __future__ import annotations
 
+import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
 
@@ -52,6 +53,96 @@ HOOK_ZONE = (210, 470)
 #: Ab hier abwaerts darf keine dauerhafte Einblendung mehr stehen, sonst
 #: verdeckt sie das Rennen.
 OVERLAY_FLOOR = 520
+
+
+# ---------------------------------------------------------------------------
+# Zwei Ausgabeformate
+#
+# Bis zum 30.07.2026 gab es nur Hochformat. Die Show laeuft im Vollbild –
+# und das ist keine gedrehte Aufloesung, sondern ein anderes Bild: die
+# sicheren Zonen oben stammen aus den SHORTS-Bedienelementen, die es in
+# einem normalen Video gar nicht gibt, dafuer liegt dort unten die
+# Fortschrittsleiste des Abspielers.
+#
+# Umgeschaltet wird zur Laufzeit wie die Besetzung, nicht ueber eine
+# zweite Konstantensammlung. Grund: JEDE Zeichenfunktion liest `theme.WIDTH`
+# beim Aufruf, nicht beim Import (geprueft) – zwei parallele Saetze waeren
+# eine zweite Wahrheit neben der geprueften.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Format:
+    """Ein Ausgabeformat samt seiner sicheren Zonen."""
+
+    name: str
+    width: int
+    height: int
+    safe_top: int
+    safe_bottom: int
+    safe_left: int
+    safe_right: int
+    hook_zone: tuple[int, int]
+    overlay_floor: int
+    hud_max_rows: int
+
+    @property
+    def quer(self) -> bool:
+        return self.width > self.height
+
+
+#: Hochformat – die Kurzfolgen. Genau die Werte, mit denen S01 und S02
+#: gelaufen sind; hier darf sich nichts aendern.
+HOCH = Format(
+    name="hoch", width=1080, height=1920,
+    safe_top=150, safe_bottom=420, safe_left=40, safe_right=190,
+    hook_zone=(210, 470), overlay_floor=520, hud_max_rows=7,
+)
+
+#: Vollbild – die Show.
+#:
+#: Die Raender sind DEUTLICH kleiner, und das ist der eigentliche
+#: Unterschied: SAFE_BOTTOM 420 im Hochformat sind die Shorts-Tonzeile und
+#: die Knopfleiste. Ein normales Video hat davon nichts, nur unten die
+#: Fortschrittsleiste, die zudem ausblendet.
+#:
+#: `hud_max_rows` faellt von 7 auf 6: sieben Zeilen waeren 470 px und damit
+#: fast die halbe Bildhoehe von 1080. Im Hochformat sind dieselben Zeilen
+#: ein Viertel.
+QUER = Format(
+    name="quer", width=1920, height=1080,
+    safe_top=60, safe_bottom=120, safe_left=70, safe_right=70,
+    hook_zone=(120, 320), overlay_floor=360, hud_max_rows=6,
+)
+
+FORMATE = {f.name: f for f in (HOCH, QUER)}
+
+#: Das gerade eingestellte Format.
+FORMAT = HOCH
+
+
+def set_format(fmt: "Format | str") -> None:
+    """Ausgabeformat umschalten.
+
+    ACHTUNG beim Bauen einer Folge: das Format geht in den
+    Geometrie-Fingerabdruck des Rundenarchivs ein (ueber `theme.WIDTH` in
+    `build.lauf_fingerabdruck`). Eine Folge, die im falschen Format
+    gerechnet wurde, ist damit als abweichend erkennbar – aber eben erst
+    hinterher.
+    """
+    global FORMAT, WIDTH, HEIGHT, SAFE_TOP, SAFE_BOTTOM, SAFE_LEFT
+    global SAFE_RIGHT, HOOK_ZONE, OVERLAY_FLOOR, HUD_MAX_ROWS
+    if isinstance(fmt, str):
+        if fmt not in FORMATE:
+            raise ValueError(
+                f"unbekanntes Format {fmt!r}, bekannt: {sorted(FORMATE)}")
+        fmt = FORMATE[fmt]
+    FORMAT = fmt
+    WIDTH, HEIGHT = fmt.width, fmt.height
+    SAFE_TOP, SAFE_BOTTOM = fmt.safe_top, fmt.safe_bottom
+    SAFE_LEFT, SAFE_RIGHT = fmt.safe_left, fmt.safe_right
+    HOOK_ZONE, OVERLAY_FLOOR = fmt.hook_zone, fmt.overlay_floor
+    HUD_MAX_ROWS = fmt.hud_max_rows
 
 # ---------------------------------------------------------------------------
 # Kamera
@@ -119,13 +210,37 @@ RESULT_SCRIM_ALPHA = 224
 # ---------------------------------------------------------------------------
 
 
+#: Muster auf der Kugel. Sie sind der Grund, warum die Show mehr
+#: Teilnehmer haben kann, als es unterscheidbare Farben gibt.
+#:
+#: Gemessen am 30.07.2026: die Stammbesetzung hat unter Rot-Gruen-Schwaeche
+#: ein engstes Paar von 61,7, und schon bei 16 Farben wird es eng. 64 oder
+#: 100 unterscheidbare FARBEN gibt es nicht. 64 unterscheidbare KENNUNGEN
+#: schon – wenn zur Farbe ein Muster kommt.
+#:
+#: Die Muster drehen sich mit der Kugel mit. Das ist kein Schmuck: die
+#: Rotationsmarke gibt es seit B1, weil sichtbar sein soll, dass wirklich
+#: gerollt wird. Ein aufgeklebtes Muster wuerde dem widersprechen.
+MUSTER = ("voll", "ring", "halb", "keil", "punkt", "doppelring", "kreuz")
+
+#: Zweitfarben. Bewusst nur zwei, und beide unbunt: gegen einen bunten
+#: Grundton sind Hell und Dunkel aus JEDER Blickrichtung verschieden –
+#: auch bei Rot-Gruen-Schwaeche, wo zwei Farbtoene zusammenfallen koennen.
+MUSTER_HELL = (245, 245, 245)
+MUSTER_DUNKEL = (22, 22, 28)
+
+
 @dataclass(frozen=True)
 class Competitor:
-    """Ein Teilnehmer: Kennung, Anzeigename, Farbe."""
+    """Ein Teilnehmer: Kennung, Anzeigename, Farbe, Muster."""
 
     key: str
     name: str
     color: tuple[int, int, int]
+    #: Muster aus MUSTER. "voll" ist die Stammbesetzung.
+    muster: str = "voll"
+    #: Farbe des Musters. Ohne Muster bedeutungslos.
+    color2: tuple[int, int, int] = MUSTER_HELL
 
     @property
     def dark(self) -> tuple[int, int, int]:
@@ -166,24 +281,215 @@ NAME_MAX = 12
 
 
 def rename(names: Iterable[str]) -> tuple[Competitor, ...]:
-    """Neue Anzeigenamen, Farben bleiben (Saison 2 aufwaerts)."""
+    """Neue Anzeigenamen, Farben UND Muster bleiben (Saison 2 aufwaerts)."""
     namen = list(names)
     if len(namen) != len(COMPETITORS):
         raise ValueError(
             f"{len(COMPETITORS)} Namen erwartet, {len(namen)} bekommen"
         )
+    # `replace` statt Neubau: sonst faellt bei jedem Namenswechsel das
+    # Muster auf den Vorgabewert zurueck, und zwei Teilnehmer der Show
+    # waeren ab da nicht mehr unterscheidbar.
     return tuple(
-        Competitor(c.key, n.strip().upper()[:NAME_MAX], c.color)
+        replace(c, name=n.strip().upper()[:NAME_MAX])
         for c, n in zip(COMPETITORS, namen)
     )
 
 
 def set_competitors(comps: tuple[Competitor, ...]) -> None:
-    """Besetzung austauschen (Saisonwechsel)."""
+    """Besetzung austauschen (Saisonwechsel, Grossfeld der Show).
+
+    Bis zum 30.07.2026 stand hier eine harte Pruefung auf genau fuenf. Sie
+    stammte aus der Zeit, in der die Saisontabelle das einzige Format war.
+    Die Langform ist eine eigene Show mit groesserem Feld – gemessen liegt
+    der Kugel-Kugel-Anteil bei 5 Teilnehmern bei 11–16 %, bei 20 bei 46 %,
+    und genau daran haengt, ob ein Rennen nach Gedraenge aussieht.
+
+    Zwei bleibt die Untergrenze: mit einem Teilnehmer gibt es kein Rennen,
+    und `rangfolge` waere sinnlos.
+    """
     global COMPETITORS
-    if len(comps) != 5:
-        raise ValueError(f"5 Teilnehmer erwartet, {len(comps)} bekommen")
+    if len(comps) < 2:
+        raise ValueError(
+            f"mindestens 2 Teilnehmer noetig, {len(comps)} bekommen")
+    if len(set(c.key for c in comps)) != len(comps):
+        # Doppelte Kennungen waeren im Rundenarchiv nicht mehr aufloesbar –
+        # und das Archiv ist der Beleg, mit dem der Kanal sein Versprechen
+        # einloest.
+        raise ValueError("Teilnehmerkennungen muessen eindeutig sein")
     COMPETITORS = comps
+
+
+# ---------------------------------------------------------------------------
+# Grossfeld
+#
+# Die Stammbesetzung ist auf fuenf ausgelegt und von Hand auf
+# Unterscheidbarkeit gebaut. Fuer die Show braucht es mehr, und „mehr Farben"
+# ist genau die Stelle, an der eine erzeugte Regenbogenpalette
+# auseinanderfaellt: benachbarte Farbtoene sehen auf einem Handy im Hellen
+# gleich aus, und bei Rot-Gruen-Schwaeche sowieso.
+#
+# Deshalb steht hier eine ausgeschriebene Liste statt einer Formel, und
+# `farbabstand` misst nach, wie dicht die engste Paarung wirklich liegt.
+# Die ersten fuenf sind die Stammbesetzung – die Show soll wie GRAVITY CUP
+# aussehen, nicht wie ein anderes Format.
+# ---------------------------------------------------------------------------
+
+#: Die elf zusaetzlichen Farben sind AUSGERECHNET, nicht ausgesucht: aus
+#: einem Farbgitter jeweils die, die den groessten Mindestabstand zu allen
+#: schon gewaehlten hat – und zwar gemessen unter Normalsicht UND unter
+#: simulierter Rot-Gruen-Schwaeche, der kleinere Wert zaehlt.
+#:
+#: Der erste Versuch war eine Liste nach Augenmass. `engste_paarung` hat sie
+#: sofort zerlegt: GOLD/AMBER lagen bei 108, SAND/PEACH bei 55 – bei einer
+#: Stammbesetzung, deren engstes Paar normalsichtig bei 240 liegt. Genau
+#: dafuer steht die Messung hier.
+GROSSFELD: tuple[Competitor, ...] = COMPETITORS + (
+    Competitor("maroon", "MAROON", (140, 0, 0)),
+    Competitor("snow", "SNOW", (245, 245, 245)),
+    Competitor("navy", "NAVY", (0, 0, 140)),
+    Competitor("lime", "LIME", (201, 242, 121)),
+    Competitor("moss", "MOSS", (88, 140, 70)),
+    Competitor("cobalt", "COBALT", (0, 32, 242)),
+    Competitor("rust", "RUST", (191, 50, 0)),
+    Competitor("fern", "FERN", (0, 140, 56)),
+    Competitor("mauve", "MAUVE", (191, 95, 146)),
+    Competitor("teal", "TEAL", (0, 130, 140)),
+    Competitor("orchid", "ORCHID", (234, 121, 242)),
+)
+
+
+def farbabstand(a: tuple[int, int, int], b: tuple[int, int, int]) -> float:
+    """Grober Wahrnehmungsabstand zweier Farben (Redmean-Naeherung).
+
+    Kein echtes CIE-Delta-E – dafuer braeuchte es eine Farbraumbibliothek,
+    und die Naeherung reicht fuer die Frage „sehen diese beiden auf einem
+    Handy gleich aus". Wichtig ist, dass ueberhaupt GEMESSEN wird: eine
+    Palette nach Augenmass hat niemand geprueft, und auffallen wuerde es
+    erst im fertigen Video.
+    """
+    rm = (a[0] + b[0]) / 2
+    dr, dg, db = a[0] - b[0], a[1] - b[1], a[2] - b[2]
+    return math.sqrt((2 + rm / 256) * dr * dr
+                     + 4 * dg * dg
+                     + (2 + (255 - rm) / 256) * db * db)
+
+
+#: Naeherungen fuer Deuteranopie und Protanopie – die beiden Formen der
+#: Rot-Gruen-Schwaeche, die zusammen rund acht Prozent der maennlichen
+#: Zuschauer betreffen. Lineare Matrizen auf sRGB, keine exakte Simulation,
+#: aber sie beantworten die Frage „fallen diese beiden Farben zusammen".
+_SEHWEISEN = {
+    "normal": (1, 0, 0, 0, 1, 0, 0, 0, 1),
+    "deuteranopie": (0.625, 0.375, 0, 0.70, 0.30, 0, 0, 0.30, 0.70),
+    "protanopie": (0.567, 0.433, 0, 0.558, 0.442, 0, 0, 0.242, 0.758),
+}
+
+
+def sehweise(farbe: tuple[int, int, int], art: str) -> tuple[float, float, float]:
+    """Farbe, wie sie mit der jeweiligen Farbwahrnehmung ankommt."""
+    r, g, b = farbe
+    m = _SEHWEISEN[art]
+    return (m[0] * r + m[1] * g + m[2] * b,
+            m[3] * r + m[4] * g + m[5] * b,
+            m[6] * r + m[7] * g + m[8] * b)
+
+
+def unterscheidbarkeit(a: tuple[int, int, int],
+                       b: tuple[int, int, int]) -> float:
+    """Abstand zweier Farben im UNGUENSTIGSTEN der drei Sehweisen."""
+    return min(farbabstand(sehweise(a, art), sehweise(b, art))
+               for art in _SEHWEISEN)
+
+
+def engste_paarung(comps: tuple[Competitor, ...],
+                   nur_normalsicht: bool = False) -> tuple[float, str, str]:
+    """(Abstand, Name, Name) des am schwersten unterscheidbaren Paares.
+
+    Standardmaessig gegen alle drei Sehweisen. Dabei faellt auf, dass die
+    STAMMBESETZUNG selbst nicht besonders gut dasteht: JADE und BLUE liegen
+    normalsichtig 251 auseinander, bei Rot-Gruen-Schwaeche nur 62. Das
+    tuerkisstichige Gruen aus dem Modulkopf vermeidet den Konflikt mit RED
+    und handelt sich dafuer einen mit BLUE ein. Bekannt, nicht behoben –
+    S01 und S02 laufen damit, und ein Farbwechsel mitten in einer Saison
+    waere schlimmer als das Problem.
+    """
+    schlechtestes = (float("inf"), "", "")
+    for i, a in enumerate(comps):
+        for b in comps[i + 1:]:
+            d = (farbabstand(a.color, b.color) if nur_normalsicht
+                 else unterscheidbarkeit(a.color, b.color))
+            if d < schlechtestes[0]:
+                schlechtestes = (d, a.name, b.name)
+    return schlechtestes
+
+
+def grossfeld(n: int) -> tuple[Competitor, ...]:
+    """Die ersten `n` Teilnehmer des Grossfelds."""
+    if not 2 <= n <= len(GROSSFELD):
+        raise ValueError(
+            f"Grossfeld fasst 2 bis {len(GROSSFELD)} Teilnehmer, {n} verlangt")
+    return GROSSFELD[:n]
+
+
+# ---------------------------------------------------------------------------
+# Das Feld der Show
+# ---------------------------------------------------------------------------
+
+def kontrastfarbe(grund: tuple[int, int, int]) -> tuple[int, int, int]:
+    """Hell oder Dunkel – was sich von `grund` staerker abhebt.
+
+    Feste Musterfarben waren der erste Entwurf, und die Messung hat ihn
+    zerlegt: SNOW ist (245,245,245) und die helle Musterfarbe ebenfalls –
+    ein weisses Muster auf weisser Kugel, gemessener Abstand 0,0. Der
+    Kontrast muss aus der Grundfarbe folgen, nicht aus einer Tabelle.
+    """
+    return max((MUSTER_HELL, MUSTER_DUNKEL),
+               key=lambda z: unterscheidbarkeit(grund, z))
+
+
+#: Reihenfolge der Muster. Erst alle sechzehn Farben voll – das ist die
+#: vertraute Besetzung –, dann dieselben Farben mit Ring, Halb, Keil und so
+#: weiter.
+#:
+#: Musterweise, nicht farbweise: so sind bei JEDER Feldgroesse alle
+#: sechzehn Farben im Spiel. Farbweise waeren die ersten sechzehn
+#: Teilnehmer alle rot.
+_VARIANTEN = MUSTER
+
+#: So viele Kennungen gibt es hoechstens: 7 Muster x 16 Farben. Ausgelegt
+#: auf ueber hundert, damit ein spaeterer Sprung von 64 auf 100 Teilnehmer
+#: nichts kostet ausser Rechenzeit.
+FELD_MAX = len(_VARIANTEN) * len(GROSSFELD)
+
+_MUSTER_KUERZEL = {"voll": "", "ring": "O", "halb": "H", "keil": "K",
+                   "punkt": "P", "doppelring": "OO", "kreuz": "X"}
+
+
+def feld(n: int) -> tuple[Competitor, ...]:
+    """`n` unterscheidbare Teilnehmer aus Farbe und Muster.
+
+    Die ersten sechzehn sind die vollen Farben und damit dieselbe
+    Besetzung wie bisher – die Show soll wie GRAVITY CUP aussehen.
+    """
+    if not 2 <= n <= FELD_MAX:
+        raise ValueError(f"Feld fasst 2 bis {FELD_MAX} Teilnehmer, {n} verlangt")
+    aus: list[Competitor] = []
+    for muster in _VARIANTEN:
+        for c in GROSSFELD:
+            if len(aus) >= n:
+                break
+            if muster == "voll":
+                aus.append(c)
+                continue
+            aus.append(replace(
+                c,
+                key=f"{c.key}-{muster}",
+                name=f"{c.name} {_MUSTER_KUERZEL[muster]}"[:NAME_MAX].strip(),
+                muster=muster, color2=kontrastfarbe(c.color)))
+        if len(aus) >= n:
+            break
+    return tuple(aus[:n])
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +562,18 @@ PANEL_RADIUS = 22
 PANEL_PAD = 18
 HUD_ROW_HEIGHT = 62
 HUD_WIDTH = 320
+
+#: So viele Zeilen zeigt die Rangliste hoechstens. Darueber werden nur
+#: Kopf und Fuss gezeigt, dazwischen eine Trennzeile mit der Anzahl.
+#:
+#: Sieben mal 62 px plus Rand sind rund 470 px – dasselbe Budget wie die
+#: fuenf Zeilen heute (gemessen 150..496). Mehr ginge nicht, ohne dass die
+#: Rangliste noch mehr Kugeln verdeckt, als sie es ohnehin schon tut.
+HUD_MAX_ROWS = 7
+#: Kopf = die Fuehrenden, Fuss = die, die als Naechstes rausfliegen. Der
+#: Fuss ist bei der Eliminierung der wichtigere Teil.
+HUD_KOPF = 3
+HUD_FUSS = 3
 HUD_DOT_RADIUS = 17
 
 _font_cache: dict[tuple[str, int], ImageFont.FreeTypeFont] = {}

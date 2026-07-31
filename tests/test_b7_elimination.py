@@ -12,6 +12,7 @@ davon nichts merkt.
 """
 from __future__ import annotations
 
+import math
 import sys
 import unittest
 from pathlib import Path
@@ -181,6 +182,68 @@ class TestEliminierung(unittest.TestCase):
         for a, b in zip(zeiten, zeiten[1:]):
             self.assertGreaterEqual(b - a, el.MIN_ABSTAND_TORE)
 
+    def test_vorgabe_bauart_aendert_die_strecke_nicht(self):
+        """Die Bauart-Umstellung darf keine gesendete Folge beruehren.
+
+        Das Rundenmanifest speichert einen Fingerabdruck der Geometrie, und
+        `--pruefen` meldet jede Abweichung. Beim Umstellen am 30.07.2026
+        wurde aus dem Literal `0` in der Wandkoordinate ein `0.0` – gleiche
+        Zahl, aber der Fingerabdruck hasht JSON, und dort ist `0` ein
+        anderer Text als `0.0`. Alle 19 Archivrunden meldeten daraufhin
+        „die Strecke hat sich seither geaendert", obwohl sich kein einziger
+        Wert geaendert hatte.
+        """
+        track = el.build_track(3)
+        wand = track.segments[-1]
+        self.assertIsInstance(
+            wand.y1, int,
+            "Wandkoordinate ist keine ganze Zahl mehr – der "
+            "Geometrie-Fingerabdruck jeder gesendeten Folge weicht damit ab")
+
+    def test_startplaetze_bleiben_bei_fuenf_wie_frueher(self):
+        """Fuenf Teilnehmer stehen in EINER Reihe, wie seit B2."""
+        plaetze = el.startplaetze(5)
+        self.assertEqual(len(set(y for _, y in plaetze)), 1,
+                         "gestaffelte Startaufstellung – B2 hat die abgeschafft")
+        mitte = theme.WIDTH / 2
+        self.assertEqual([x for x, _ in plaetze],
+                         [mitte + (i - 2) * el.START_SPACING for i in range(5)])
+
+    def test_grosses_feld_passt_in_den_schacht(self):
+        """Sechzehn Startplaetze, alle innerhalb der Waende, keine Ueberlappung."""
+        b = el.SHOW
+        plaetze = el.startplaetze(el.SHOW_TEILNEHMER, b)
+        self.assertEqual(len(plaetze), el.SHOW_TEILNEHMER)
+        innen_links = b.wand_links + el.SEG_RADIUS + theme.MARBLE_RADIUS
+        innen_rechts = b.wand_rechts - el.SEG_RADIUS - theme.MARBLE_RADIUS
+        for x, _ in plaetze:
+            self.assertGreaterEqual(x, innen_links)
+            self.assertLessEqual(x, innen_rechts)
+        for i, a in enumerate(plaetze):
+            for b2 in plaetze[i + 1:]:
+                abstand = math.dist(a, b2)
+                self.assertGreaterEqual(
+                    abstand, el.MARBLE_D,
+                    "Startplaetze ueberlappen – pymunk schleudert die Kugeln "
+                    "beim ersten Schritt auseinander")
+
+    def test_notbremse_waechst_mit_der_torzahl(self):
+        """Die Vorgabe von 60 s ist auf vier Tore ausgelegt.
+
+        Bei fuenfzehn schneidet sie mitten durch: die ersten Show-Laeufe
+        endeten mit 6 von 15 Ausscheidungen und niemandem im Ziel, und
+        nichts daran sah nach einem Fehler aus.
+        """
+        self.assertGreaterEqual(el.notbremse(el.TORE), physics.MAX_SECONDS)
+        self.assertGreater(el.notbremse(15), 15 * 5.9,
+                           "Notbremse kuerzer als ein normaler 15-Tore-Lauf")
+
+    def test_bauart_lehnt_unbaubare_masse_ab(self):
+        with self.assertRaises(ValueError):
+            el.Bauart(wand_links=480.0, wand_rechts=600.0).pruefen()
+        with self.assertRaises(ValueError):
+            el.Bauart(rutsche_abstand=100.0).pruefen()
+
     def test_regel_verlangt_passende_torzahl(self):
         regel = el.Elimination([100.0, 200.0], 900.0)
         with self.assertRaises(ValueError):
@@ -200,6 +263,47 @@ class TestEliminierung(unittest.TestCase):
         self.assertEqual(len(raus), 1)
         # Wer am spaetesten quert, ist raus – hier der mit dem groessten y.
         self.assertEqual(raus, {0})
+
+    def test_tor_feuert_auch_wenn_es_vorzeitig_passiert_wurde(self):
+        """Der Fall, an dem die Disziplin bei 30 Teilnehmern haengenblieb.
+
+        Die erste Fassung zaehlte Querungen nur fuer das GERADE AKTUELLE
+        Tor. Wer ein Tor passierte, bevor die Regel darauf umschaltete,
+        wurde nie gezaehlt – und weil das Tor auf `len(aktiv) - 1`
+        Querungen wartet, wartete es dann fuer immer.
+
+        Bei fuenf Teilnehmern kann das nicht eintreten: das Feld ist enger
+        als ein Abschnitt (Median 255 px, Maximum 1474 bei 1984 px
+        Abschnittshoehe). Die Voraussetzung stand nirgends und wurde
+        nirgends geprueft. Gemessen am 30.07.2026 mit 30 Teilnehmern:
+        2 von 29 Ausscheidungen, danach Stillstand, obwohl alle 28
+        verbliebenen Kugeln laengst unter der Linie standen, auf die die
+        Regel wartete. Nach der Reparatur: 29 von 29, an drei Seeds.
+
+        Hier nachgestellt mit fuenf: im ersten Schritt springen vier
+        Teilnehmer ueber Tor 1 UND Tor 2 hinweg. Tor 1 feuert. Tor 2 darf
+        danach nicht auf Querungen warten, die schon passiert sind.
+        """
+        regel = el.Elimination([100.0, 200.0, 300.0, 400.0], 900.0)
+        regel.vorbereiten(N)
+
+        # Schritt 1: vier ueberspringen beide Tore, einer bleibt oben.
+        raus = regel.schritt(0.0, 0.01, [50.0] * N,
+                             [250.0, 260.0, 270.0, 280.0, 90.0])
+        self.assertEqual(raus, {4}, "Tor 1 hat den Letzten nicht erwischt")
+        self.assertEqual(regel.tor, 1)
+
+        # Schritt 2: niemand quert JETZT Tor 2 – alle sind laengst drunter.
+        raus = regel.schritt(0.01, 0.01,
+                             [250.0, 260.0, 270.0, 280.0, 90.0],
+                             [251.0, 261.0, 271.0, 281.0, 90.0])
+        self.assertEqual(len(raus), 1,
+                         "Tor 2 feuert nicht, obwohl alle es passiert haben – "
+                         "die Regel wartet auf ein Ereignis, das vorbei ist")
+        # Wer am spaetesten gequert hat, ist raus: Teilnehmer 0 kam mit dem
+        # kuerzesten Sprung ueber die Linie und damit als Letzter.
+        self.assertEqual(raus, {0})
+        self.assertEqual(regel.tor, 2)
 
     def test_wertung_bleibt_vollstaendig_wenn_der_lauf_abbricht(self):
         """Notbremse mit drei noch Aktiven: trotzdem fuenf Plaetze."""
