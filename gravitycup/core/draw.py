@@ -452,6 +452,43 @@ class Canvas:
         zeilen += [(r, order[r]) for r in range(len(order) - fuss, len(order))]
         return zeilen
 
+    #: Waagrechte Masse der Rangliste, gerechnet ab dem linken Panelrand.
+    HUD_PUNKT_X = 34          # Mitte des Farbpunkts
+    HUD_RANG_X = 66           # linke Kante der Platzziffer
+    HUD_SPALTENLUFT = 16      # zwischen Platzziffer und Name
+    HUD_RAND = 28             # rechts neben dem laengsten Namen
+
+    def hud_spalten(self, zeilen, comps) -> tuple[float, float, float]:
+        """Wo Platzziffer und Name beginnen, und wie breit der Kasten wird.
+
+        Als eigene Funktion, damit sie ohne Bild pruefbar ist – wie
+        `hud_zeilen`, und aus demselben Grund.
+
+        Die Namensspalte stand fest bei 108 px. Das reichte fuer zwei
+        Stellen und war nie falsch, solange fuenf oder vierundsechzig
+        antraten. Bei HUNDERT schob sich die Platzziffer in den Namen:
+        gemessen in der Vorschau vom 31.07.2026 stand dort woertlich
+        "100GOLD K".
+
+        Dieselbe Fehlerklasse, die dieses Projekt in der Physik fuenfmal
+        getroffen hat – ein Mass, das fuer ein kleineres Feld ausgelegt
+        war. Deshalb steht die Spalte jetzt hinter der laengsten wirklich
+        vorkommenden Platzziffer, statt hinter einer Zahl.
+        """
+        ziffern = max(
+            (self.measure(f"{rang + 1}", "hud_entry")[0]
+             for rang, idx in zeilen if idx is not None),
+            default=0,
+        )
+        namen = max(
+            (self.measure(comps[idx].name, "hud_entry")[0]
+             for _, idx in zeilen if idx is not None),
+            default=0,
+        )
+        namen_x = self.HUD_RANG_X + ziffern + self.HUD_SPALTENLUFT
+        breite = max(theme.HUD_WIDTH, namen_x + namen + self.HUD_RAND)
+        return self.HUD_RANG_X, namen_x, breite
+
     def hud_ranking(self, order: list[int], comps=None,
                     alpha: int = 255, top: float | None = None,
                     raus: set[int] | None = None) -> None:
@@ -482,15 +519,7 @@ class Canvas:
         zeilen = self.hud_zeilen(order)
         hoehe = theme.HUD_ROW_HEIGHT * len(zeilen) + theme.PANEL_PAD * 2
 
-        # Breite nach dem laengsten Namen, nicht nach einer festen Zahl:
-        # ab Saison 2 kommen die Namen aus den Kommentaren und sind laenger
-        # als "VIOLET". Eine feste Breite wuerde sie abschneiden.
-        namen_breite = max(
-            (self.measure(comps[i].name, "hud_entry")[0]
-             for _, i in zeilen if i is not None),
-            default=0,
-        )
-        breite = max(theme.HUD_WIDTH, 108 + namen_breite + 28)
+        rang_x, namen_x, breite = self.hud_spalten(zeilen, comps)
         breite = min(breite, theme.WIDTH - theme.SAFE_RIGHT - x)
         self.panel((x, y, x + breite, y + hoehe),
                    alpha=int(theme.PANEL_ALPHA * alpha / 255))
@@ -501,7 +530,7 @@ class Canvas:
                 zeile_y = (y + theme.PANEL_PAD
                            + theme.HUD_ROW_HEIGHT * zeile
                            + theme.HUD_ROW_HEIGHT / 2)
-                self.text(x + 66, zeile_y, f"+{rang}", "hud_entry",
+                self.text(x + rang_x, zeile_y, f"+{rang}", "hud_entry",
                           fill=theme.TEXT_MUTED, anchor="lm", alpha=alpha // 2)
                 continue
             comp = comps[idx]
@@ -510,23 +539,23 @@ class Canvas:
             zeile_y = y + theme.PANEL_PAD + theme.HUD_ROW_HEIGHT * zeile \
                 + theme.HUD_ROW_HEIGHT / 2
             r = theme.HUD_DOT_RADIUS
-            cx = x + 34
+            cx = x + self.HUD_PUNKT_X
             self.draw.ellipse(
                 [self.s(cx - r), self.s(zeile_y - r),
                  self.s(cx + r), self.s(zeile_y + r)],
                 fill=comp.color + (a,),
             )
-            self.text(x + 66, zeile_y, f"{rang + 1}", "hud_entry",
+            self.text(x + rang_x, zeile_y, f"{rang + 1}", "hud_entry",
                       fill=theme.TEXT_MUTED, anchor="lm", alpha=a)
-            self.text(x + 108, zeile_y, comp.name, "hud_entry",
+            self.text(x + namen_x, zeile_y, comp.name, "hud_entry",
                       fill=theme.TEXT, anchor="lm", alpha=a)
             if draussen:
                 # Durchgestrichen. Nur abzudunkeln reicht nicht – auf einem
                 # Handy im Hellen sieht gedaempft aus wie „steht hinten".
                 breite_name = self.measure(comp.name, "hud_entry")[0]
                 self.draw.line(
-                    [self.s(x + 102), self.s(zeile_y),
-                     self.s(x + 112 + breite_name), self.s(zeile_y)],
+                    [self.s(x + namen_x - 6), self.s(zeile_y),
+                     self.s(x + namen_x + breite_name + 4), self.s(zeile_y)],
                     fill=theme.TEXT_MUTED + (a,), width=max(1, int(self.s(3))))
 
     def hook_layout(self, titel: str, unterzeile: str = "") -> dict:

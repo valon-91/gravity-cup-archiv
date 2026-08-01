@@ -200,16 +200,56 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description="Eine Folge nicht gelistet zu YouTube hochladen")
     ap.add_argument("--runde", help="z. B. S01R02")
+    ap.add_argument("--datei", metavar="MP4",
+                    help="eine freie Datei hochladen (Trailer, Vorschau). "
+                         "Titel und Text kommen aus der .txt daneben. "
+                         "OHNE Rundenarchiv - deshalb nur fuer Videos, die "
+                         "kein Rennergebnis zeigen.")
     ap.add_argument("--naechste", action="store_true",
                     help="die naechste Runde ohne youtube_id nehmen")
     ap.add_argument("--wirklich", action="store_true",
                     help="tatsaechlich hochladen (sonst Trockenuebung)")
     a = ap.parse_args()
 
-    if a.naechste and a.runde:
-        ap.error("--runde und --naechste schliessen sich aus")
-    if not a.naechste and not a.runde:
-        ap.error("--runde oder --naechste angeben")
+    gewaehlt = sum(1 for x in (a.naechste, a.runde, a.datei) if x)
+    if gewaehlt != 1:
+        ap.error("genau eines von --runde, --naechste, --datei angeben")
+
+    if a.datei:
+        # Freie Datei: kein Manifest, keine youtube_id, kein Archivvermerk.
+        #
+        # Das ist bewusst der duennere Weg und NUR fuer Videos gedacht, die
+        # kein Rennergebnis zeigen - den Kanaltrailer zum Beispiel. Eine
+        # Folge ohne Manifest waere nicht nachrechenbar, und genau das ist
+        # das Versprechen des Kanals.
+        mp4 = Path(a.datei)
+        if not mp4.exists():
+            print("Datei nicht gefunden: " + str(mp4))
+            return 2
+        txt = mp4.with_suffix(".txt")
+        if not txt.exists():
+            print("Kein Beschreibungstext neben der Datei: " + str(txt))
+            return 2
+        titel, text = titel_und_text(txt)
+        print()
+        print("  Datei        " + mp4.name + "  ("
+              + format(mp4.stat().st_size / 1e6, ".1f") + " MB)")
+        print("  Titel        " + titel)
+        print("  Beschreibung " + str(len(text)) + " Zeichen aus " + txt.name)
+        print("  Schlagworte  " + (", ".join(schlagworte(text)) or "-"))
+        print("  Sichtbarkeit nicht gelistet   (fest, siehe Modulkopf)")
+        print("  Fuer Kinder  nein             (fest)")
+        print()
+        if not a.wirklich:
+            print("Trockenuebung. Zum Hochladen: --wirklich")
+            return 0
+        kennung = hochladen("(frei)", mp4, titel, text)
+        print()
+        print("hochgeladen: https://youtu.be/" + kennung)
+        print()
+        print("KEIN Archivvermerk - diese Datei hat kein Rundenmanifest.")
+        print("Das Umstellen auf oeffentlich bleibt Handarbeit.")
+        return 0
 
     if a.naechste:
         offen = offene_runden()

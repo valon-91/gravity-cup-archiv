@@ -22,6 +22,11 @@ from gravitycup.core import physics, theme              # noqa: E402
 from gravitycup.disciplines import arena                # noqa: E402
 
 
+#: Feldgroesse der Show. Muss der von `tools/show.py` entsprechen – ein Test
+#: mit einem anderen Feld prueft etwas anderes als das, was gesendet wird.
+SHOWFELD = 100
+
+
 class ArenaFall(unittest.TestCase):
     """Gemeinsame Umgebung: Vollbild und grosses Feld."""
 
@@ -30,7 +35,7 @@ class ArenaFall(unittest.TestCase):
         cls._format = theme.FORMAT
         cls._comps = theme.competitors()
         theme.set_format("quer")
-        theme.set_competitors(theme.feld(64))
+        theme.set_competitors(theme.feld(SHOWFELD))
 
     @classmethod
     def tearDownClass(cls):
@@ -105,6 +110,20 @@ class TestGeometrie(ArenaFall):
         for seed in (1, 2, 3, 7):
             track = arena.build_track(seed, 64)
             self.assertEqual(arena.pruefe_durchlaesse(track, 64), [], seed)
+
+    def test_jede_luecke_fasst_zwei_kugeln(self):
+        """In den Schacht-Disziplinen reicht EINE Kugel Durchlass, hier
+        nicht: bei sechzig Teilnehmern erreichen zwei Kugeln dieselbe
+        Luecke im selben Augenblick und verkeilen sich.
+
+        Gemessen ueber 132 Kammerproben: mit einer Kugel Abstand bleiben
+        zehn Kammern stehen, mit zwei keine. Neun der zehn Faelle waren
+        zwei Kugeln zwischen einem Stift und der Seitenwand, lichte Weite
+        111 px - genug fuer eine, zu wenig fuer zwei.
+        """
+        self.assertGreaterEqual(arena.KUGELN_NEBENEINANDER, 2)
+        self.assertGreater(arena.MIN_GAP, 2 * arena.MARBLE_D)
+        self.assertGreater(arena.CLEARANCE, arena.MIN_GAP)
 
     def test_startplaetze_ueberlappen_nicht(self):
         """Ueberlappende Koerper schleudert pymunk im ersten Schritt
@@ -216,6 +235,28 @@ class TestRegel(ArenaFall):
         self.assertTrue(raus, "Raeumzeit hat kein Tor ausgeloest")
         self.assertGreater(regel.kammer, 0)
 
+    def test_gleichzeitig_durch_scheidet_trotzdem_aus(self):
+        """Kommen MEHR gleichzeitig durch als das Kontingent zulaesst,
+        muss die Kammer trotzdem ausscheiden lassen.
+
+        Die alte Fassung setzte "raus = wer nicht durch ist" und traf damit
+        niemanden, wenn alle zugleich unten waren. Solange der Ausgang ein
+        Nadeloehr war, konnte das nicht vorkommen; mit fuenf Kugelbreiten
+        endete seed 11 mit 62 von 63 Ausscheidungen und ZWEI im Ziel.
+        """
+        formen = [arena.Kammerform(1, 0, 100, 0, 500, weiter=1,
+                                   austritt=140, ausgang=200, halt=0.0)]
+        regel = arena.Kammern(formen, finish_y=9999)
+        regel.vorbereiten(3)
+        # Alle drei stehen in der Kammer, aber UEBER der Austrittslinie.
+        self.assertEqual(regel.schritt(0.0, 1.0, [120] * 3, [120] * 3,
+                                       [250] * 3), set())
+        self.assertIn(0, regel.offene_tore())
+        # Und jetzt queren alle drei im selben Augenblick.
+        raus = regel.schritt(1.0, 1.0, [120] * 3, [150, 151, 152], [250] * 3)
+        self.assertEqual(len(raus), 2, "zwei von drei muessen raus")
+        self.assertEqual(len(regel.aktiv), 1)
+
     def test_letzte_kammer_muss_einen_uebrig_lassen(self):
         formen = arena.kammerformen(4)
         kaputt = list(formen[:-1])
@@ -236,21 +277,26 @@ class TestRegel(ArenaFall):
 class TestLauf(ArenaFall):
     """EIN vollstaendiger Lauf im echten Showformat.
 
-    Bewusst mit 64 Teilnehmern und nicht mit einem kleinen Feld: die
+    Bewusst mit dem GESENDETEN Feld und nicht mit einem kleinen: die
     Kennzahlen der Disziplin haengen an der Feldgroesse, und ein Test mit
     zwoelf Kugeln pruefte etwas anderes als das, was gesendet wird.
-    Gemessen: 64 Teilnehmer 30-35 % Kugel-Kugel, 24 nur noch 21 %,
-    16 noch 19 %. Kostet rund zwanzig Sekunden.
+    Gemessen: 100 Teilnehmer 81 % Kugel-Kugel, 64 noch 75 %, 24 nur noch
+    21 %, 16 noch 19 %.
+
+    Der Lauf kostet rund zwei Minuten. Das ist der Preis dafuer, dass diese
+    Klasse die einzige Stelle ist, an der die vier Zahlen gemeinsam
+    geprueft werden - und zweimal am 31.07.2026 wurde "bestanden"
+    gemeldet, weil jeweils nur eine davon angesehen wurde.
     """
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.r = arena.run(2, 64)
+        cls.r = arena.run(2, SHOWFELD)
         cls.k = arena.kennzahlen(cls.r)
 
     def test_alle_scheiden_aus_bis_auf_einen(self):
-        self.assertEqual(self.k["ausgeschieden"], 63)
+        self.assertEqual(self.k["ausgeschieden"], SHOWFELD - 1)
         self.assertEqual(len(self.r.finished), 1)
 
     def test_keine_kugel_geht_verloren(self):
@@ -275,6 +321,36 @@ class TestLauf(ArenaFall):
         arten = Counter(h.kind for h in self.r.hits)
         anteil = arten.get("marble", 0) / max(1, sum(arten.values()))
         self.assertGreater(anteil, arena.MIN_KUGEL_KUGEL, f"{anteil:.0%}")
+
+    def test_nichts_steht_still(self):
+        """DIE Zahl, die gefehlt hat.
+
+        Am 31.07.2026 wurde zweimal "bestanden" gemeldet, waehrend das
+        Video stand - jedesmal war eine andere Zahl gruen. Die Ursache war
+        immer dieselbe: die Raeumzeit zaehlt die Kaskade auch dann zu Ende,
+        wenn sich nichts mehr bewegt. `ausgeschieden` sagt 63 von 63, und
+        das Bild steht.
+
+        Gemessen in SEKUNDEN, nicht als Anteil: die alte Bauart stand
+        80 bis 236 s am Stueck, die reparierte 1,2 bis 3,2 s.
+        """
+        self.assertLessEqual(
+            self.k["stillstand"], arena.MAX_STILLSTAND,
+            f"{self.k['stillstand']:.1f}s am Stueck ohne Bewegung "
+            f"(Schnitt {self.k['lebendig']:.0%}, ruhigste Kammer "
+            f"{self.k['lebendig_schlechteste']:.0%})")
+
+    def test_lauf_endet_von_selbst(self):
+        """Die Notbremse ist ein Abbruch, keine Laufzeit.
+
+        Sie fiel durch jedes Raster: 2520 s liegen mitten im erlaubten
+        Fenster von 300 bis 3600 s. Ein Lauf, der sie erreicht, hat sich
+        nicht selbst beendet - irgendwo haengt jemand fest.
+        """
+        grenze = self.r.extras["notbremse"]
+        self.assertLess(self.r.duration, grenze - 1.0,
+                        f"{self.r.duration:.0f}s gegen die Notbremse "
+                        f"{grenze:.0f}s")
 
     def test_ausgeschiedene_bleiben_stehen(self):
         for i, zeit in self.r.eliminated.items():

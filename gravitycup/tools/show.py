@@ -33,7 +33,27 @@ from . import karten
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-TEILNEHMER = 64
+#: Feldgroesse der Show.
+#:
+#: Von 64 auf 100 am 31.07.2026, und die Begruendung ist gemessen, nicht
+#: geschmacklich. Nachdem die Kammern durchlaessig waren, dauerte ein Lauf
+#: mit 64 nur noch 4:28 - unter der Mindestlaenge. Zwei Hebel standen zur
+#: Wahl, und sie sind nicht gleichwertig:
+#:
+#:     N     Ruhemoment   Dauer    Stillstand   Kugel-Kugel
+#:     64        1,6 s     4:28        1,3 s        75 %
+#:     64        4,0 s     7:00        3,6 s        75 %
+#:     64        7,0 s    10:07        6,4 s        75 %
+#:    100        1,6 s     8:17        1,3 s        81 %
+#:    100        4,0 s    12:18        3,9 s        81 %
+#:
+#: Mehr Teilnehmer kostet KEINE Totzeit - der laengste Stillstand bleibt
+#: bei 1,3 s - und das Gedraenge steigt von 75 auf 81 %. Ein laengerer
+#: Ruhemoment kauft dieselbe Laenge mit Warten. Deshalb 100 und der
+#: Ruhemoment unveraendert.
+#:
+#: Die Kennungen in `theme` tragen bis 112.
+TEILNEHMER = 100
 NL_ = chr(10)
 
 #: Rundenarchiv der Show. Dasselbe Verzeichnis wie die Saison - die Show

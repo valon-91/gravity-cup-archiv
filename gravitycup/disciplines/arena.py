@@ -78,10 +78,29 @@ PEG_RADIUS = float(theme.PEG_RADIUS)
 #: nicht; die Schacht-Disziplinen bleiben unberuehrt bei 10.
 SOLVER_ITERATIONEN = 40
 
-#: Platz neben einem Hindernis. Wie in B4/B7 abgeleitet, nicht gewaehlt:
-#: eine Luecke schmaler als eine Kugel ist eine Falle.
-CLEARANCE = MARBLE_D + 16
-MIN_GAP = MARBLE_D + 10
+#: Wie viele Kugeln NEBENEINANDER durch eine Luecke passen muessen.
+#:
+#: In B4/B7/B8 ist das eine, und dort stimmt es: bei fuenf Teilnehmern
+#: erreichen praktisch nie zwei Kugeln dieselbe Luecke im selben Augenblick,
+#: und wer warten muss, faehrt eben hinterher. In einer Kammer mit sechzig
+#: Kugeln erreichen sie JEDE Luecke gleichzeitig - und zwei Kugeln brauchen
+#: 128 px, wo die alte Regel nur 64 sicherte.
+#:
+#: GEMESSEN am 31.07.2026 ueber 132 Kammerproben (drei Seeds, Kammern
+#: 20-63): mit einer Kugel Abstand bleiben zehn Kammern stehen, mit zwei
+#: keine einzige. Neun der zehn Faelle waren wortwoertlich zwei Kugeln,
+#: verkeilt zwischen einem Stift und der Seitenwand - lichte Weite 111 px,
+#: genug fuer eine, zu wenig fuer zwei. Es kostet 16 % der Stifte
+#: (576 -> 482 je Strecke).
+#:
+#: Dieselbe Fehlerklasse wie die 36-px-Engstelle, an der das Sturzrennen
+#: einmal 94 % seiner Laeufe verlor. Nur zaehlt hier nicht die einzelne
+#: Kugel, sondern das Feld.
+KUGELN_NEBENEINANDER = 2
+
+#: Platz neben einem Hindernis. Wie in B4/B7 abgeleitet, nicht gewaehlt.
+CLEARANCE = KUGELN_NEBENEINANDER * MARBLE_D + 16
+MIN_GAP = KUGELN_NEBENEINANDER * MARBLE_D + 10
 
 
 # ---------------------------------------------------------------------------
@@ -147,13 +166,41 @@ class Bauart:
     #: Gemessen mit 64 Kugeln in einer Kammer, wie lange bis 48 durch sind:
     #:     2 Kugeln   nie      verklemmt dauerhaft, und zwei Kugeln gehen
     #:                         dabei durch die Wand verloren
-    #:     3 Kugeln    8 s     <- gewaehlt
+    #:     3 Kugeln    8 s
     #:     4 Kugeln    4 s
-    #:     6 Kugeln    3 s
-    #: Zwei ist eine Falle, ab vier laeuft die Kammer leer, bevor ein
-    #: Gedraengel entsteht. Drei ist der Punkt, an dem es acht Sekunden lang
-    #: eng zugeht.
-    ausgang_kugeln: float = 3.0
+    #:     5 Kugeln    3 s     <- gewaehlt
+    #:
+    #: Bis zum 31.07.2026 standen hier DREI, begruendet mit "ab vier laeuft
+    #: die Kammer leer, bevor ein Gedraengel entsteht". Diese Begruendung
+    #: ist verfallen, und zwar an dem Tag, an dem die Sperren dazukamen:
+    #: seither bestimmt die HALTEZEIT die Dauer einer Kammer, nicht ihr
+    #: Abflussverhalten, und das Gedraenge entsteht, waehrend die Sperre ZU
+    #: ist. Der enge Ausgang bringt seither kein Gedraenge mehr - nur noch
+    #: Boegen.
+    #:
+    #: Und ein Bogen ist kein Zufall, sondern Schuettgutmechanik: harte,
+    #: reibungsbehaftete Scheiben verklemmen eine Oeffnung noch bei VIER
+    #: Korndurchmessern in der Haelfte der Faelle. Bei 2,4 bis 3,0 ist der
+    #: Bogen der Normalfall, nicht die Ausnahme - wir haben eine Falle
+    #: gebaut und sie fuer den Mechanismus gehalten.
+    #:
+    #: GEMESSEN am 31.07.2026, zuerst an 132 Kammerproben: mit 3,0/2,4
+    #: bleiben fuenfzehn Kammern stehen, mit 4,0/3,2 keine.
+    #:
+    #: Vier reicht aber NICHT, und das zeigte erst der volle Lauf. Die
+    #: Kammerprobe stellt das Feld gesetzt in die Kammer; im Lauf faellt es
+    #: mit Schwung ein, und ein Pulk mit Schwung baut Boegen, die ein
+    #: ruhender nicht baut. An vier Seeds gemessen:
+    #:
+    #:     Ausgang    laengster Stillstand am Stueck
+    #:     4,0/3,2    3,2 · 1,4 · 1,2 s  -  und 215,2 s bei seed 7
+    #:     5,0/4,0    1,3 · 1,0 · 1,3 · 1,3 s
+    #:
+    #: Bei seed 7 standen 19 Kugeln bewegungslos im Trichter von Kammer 40,
+    #: dreieinhalb Minuten lang, waehrend die Regel per Raeumzeit schon bei
+    #: Kammer 46 war. Genau das sagt die Schuettgutmechanik vorher: bei vier
+    #: Korndurchmessern verklemmt es noch in der Haelfte der Faelle.
+    ausgang_kugeln: float = 5.0
     #: Ausgangsweite der KLEINSTEN Kammer, in Kugeldurchmessern.
     #:
     #: Der Ausgang schrumpft mit dem Feld, so wie die Kammer. Ohne das ist
@@ -163,10 +210,18 @@ class Bauart:
     #: 64er-Lauf nur 2,3 Minuten, weil die spaeten Kammern in Sekunden
     #: durchliefen.
     #:
-    #: Nicht unter 1,6: bei zwei Kugelbreiten verklemmte eine 64er-Kammer
-    #: dauerhaft, und der Druck druckte zwei Kugeln durch die Wand. Fuer
-    #: ein kleines Feld ist 1,6 dagegen weit genug.
-    ausgang_kugeln_min: float = 2.4
+    #: Nicht unter 4,0, und der alte Wert 2,4 stammte aus der falschen
+    #: Frage. Gefragt war "ab wann verklemmt sich EINE Kugel" - Antwort 1,6,
+    #: dann vorsichtshalber auf 2,4 erhoeht. Es verklemmt sich aber nicht
+    #: eine Kugel, es verklemmen sich mehrere zu einem Bogen, und dafuer
+    #: ist 2,4 mitten im Verklemmungsbereich. Gemessen: bei 2,4 stehen die
+    #: Kammern 55 bis 63 reihenweise, bei 4,0 keine.
+    #:
+    #: Der Ausgang schrumpft damit nur noch von 320 auf 256 px statt von
+    #: 192 auf 154. Das ist Absicht: er soll mit dem Feld schrumpfen, damit
+    #: die kleinen Kammern nicht in Sekunden leerlaufen - aber er darf
+    #: dabei nicht in den Verklemmungsbereich zurueckfallen.
+    ausgang_kugeln_min: float = 4.0
     #: Zwischenboeden. AUS, und das ist ein Messergebnis.
     #:
     #: Sie sollten Zeit in der Kammer schaffen: ein Zickzackweg, ohne dass
@@ -219,16 +274,70 @@ class Bauart:
     prell_elastizitaet: float = 1.15
     #: Senkrechter Abstand zwischen zwei Kammern.
     abstand: float = 520.0
-    #: Drehkreuz ueber dem Ausgang. DAS ist die Abhilfe gegen den
-    #: verkeilten Haufen: gemessen an SHOW-01 bewegten sich 86 % der
-    #: Laufzeit weniger als zehn Prozent der Kugeln - 19,4 von 22,8 Minuten
-    #: Stillstand, waehrend die Ausscheidungen nur noch von der Raeumzeit
-    #: kamen. Ein Rotor schiebt den Pulk durch die Engstelle, statt darauf
-    #: zu warten, dass die Schwerkraft es tut.
-    rotor: bool = True
+    #: Drehkreuz ueber dem Ausgang. AUS, und das ist die Lehre des
+    #: 31.07.2026: der Rotor war die URSACHE, nicht die Abhilfe.
+    #:
+    #: Gedacht war er als Ruehrwerk gegen den verkeilten Haufen - gemessen
+    #: an SHOW-01 standen 19,4 von 22,8 Minuten still. Gemessen tut er
+    #: drei Dinge, und alle drei sind falsch:
+    #:
+    #: 1. ER REICHT NICHT AN DEN STAU. Der Bogen bildet sich IM
+    #:    Trichtermund; der Rotor sitzt darueber, und seine Laenge ist auf
+    #:    `ausgang * rotor_spanne` gedeckelt. Gemessen an Kammer 47 eines
+    #:    vollen Laufs: drei Kugeln stehen dreissig Sekunden lang auf
+    #:    derselben Koordinate, 230 px unter der Achse bei 180 px
+    #:    Reichweite. Er ruehrt UEBER dem Stau.
+    #:
+    #: 2. ER SCHLAEGT DIE LETZTE KUGEL ZURUECK. Wer allein den Trichter
+    #:    hinunterrollt, kommt an dessen tiefstem Punkt in Reichweite und
+    #:    wird wieder hinaufgeworfen - eine Sperrklinke in die falsche
+    #:    Richtung. Gemessen an einem Ueberlebenden: 92 px vor dem Ausgang,
+    #:    21 % der Rechenschritte in Reichweite, fuenfundzwanzig Minuten
+    #:    lang, bis die Notbremse kam. DAS war "das Ankommen ist nicht
+    #:    geloest".
+    #:
+    #: 3. ER WIRD SCHLIMMER, JE WEITER DER AUSGANG IST, weil er mit ihm
+    #:    waechst. Mit 4,0 Kugeln fing er eine EINZELNE Kugel in 132 von
+    #:    189 Kammern ab. Ohne ihn: null von 189.
+    #:
+    #: Der Haufen braucht auch kein Ruehrwerk, sobald der Ausgang weit
+    #: genug ist: gemessen ueber 189 Kammerproben laeuft ohne Rotor jede
+    #: Kammer durch, in hoechstens 5,9 s, und die ruhigste bewegt sich
+    #: 92 % ihrer Dauer.
+    #:
+    #: Der Code bleibt stehen. Wird je ein Ruehrwerk gebraucht, dann als
+    #: RUETTLER am Trichter statt als Drehkreuz darueber: ein Bogen bricht
+    #: an seinem schwaechsten Glied, und dafuer ist Vibration das Mittel -
+    #: so loest die Schuettgutmechanik dasselbe Problem seit jeher.
+    rotor: bool = False
     #: Umdrehungen je Sekunde.
     rotor_drehzahl: float = 0.60
     rotor_fluegel: int = 3
+    #: Wie hoch ueber dem Kammerboden der Rotor sitzt. Der Trichter beginnt
+    #: 220 px darueber; alles darueber greift ins Leere, sobald das Feld
+    #: klein genug ist, um ganz im Trichter zu liegen.
+    rotor_hoehe: float = 250.0
+    #: Fluegellaenge als Vielfaches der Ausgangsweite.
+    rotor_spanne: float = 0.9
+    #: Hoehe des Trichters. War fest 220 px, und das ist die Wurzel des
+    #: Bogenproblems: bei 850 px halber Kammerbreite ergibt das 16 Grad
+    #: Neigung. So flach rollt ohne Druck von oben nichts von allein, und
+    #: wenige Kugeln bilden einen Bogen, der sich selbst traegt.
+    #:
+    #: Als VIELFACHES der halben Kammerbreite, damit die Neigung in jeder
+    #: Kammer gleich bleibt statt mit der Breite zu kippen. 1.0 = 45 Grad.
+    #:
+    #: 0.0 heisst "wie bisher": feste 220 px Hoehe. Das ist die VORGABE,
+    #: weil der steile Trichter am 31.07. einen Test riss - bei kleinem
+    #: Feld gingen Kugeln verloren. Der Parameter bleibt zum Weitermessen
+    #: stehen, die Vorgabe aendert nichts an bestehenden Laeufen.
+    trichter_neigung: float = 0.0
+
+    def trichter_hoehe(self, breite: float, ausgang: float) -> float:
+        if self.trichter_neigung <= 0:
+            return 220.0
+        lauf = breite / 2 - ausgang / 2
+        return max(180.0, lauf * self.trichter_neigung)
     #: Haltezeit der ERSTEN und der LETZTEN Kammer, in Sekunden.
     #:
     #: DAS bestimmt jetzt die Laufzeit, nicht mehr das Abflussverhalten.
@@ -395,22 +504,26 @@ def build_track(seed: int, teilnehmer: int,
 
     for form in formen:
         # Seitenwaende. Die erste reicht ueber die Startkammer hinauf.
+        wand_unten = form.unten - bauart.trichter_hoehe(
+            form.rechts - form.links, form.ausgang)
         wand_oben = form.oben - 60 - (start_hoehe if form.nummer == 1 else 0)
         segments.append(physics.Segment(form.links, wand_oben,
-                                        form.links, form.unten - 220,
-                                        SEG_RADIUS))
+                                        form.links, wand_unten, SEG_RADIUS))
         segments.append(physics.Segment(form.rechts, wand_oben,
-                                        form.rechts, form.unten - 220,
-                                        SEG_RADIUS))
+                                        form.rechts, wand_unten, SEG_RADIUS))
         # Trichter auf den Ausgang zu. Der Versatz wechselt mit dem Seed,
         # sonst begaenstigt eine feste Seite immer dieselbe Bildhaelfte –
         # die Lehre aus B4.
         versatz = rng.uniform(-0.16, 0.16) * (form.rechts - form.links)
         tor_links = mitte + versatz - form.ausgang / 2
         tor_rechts = mitte + versatz + form.ausgang / 2
-        segments.append(physics.Segment(form.links, form.unten - 220,
+        # Trichterhoehe folgt der Breite, damit die NEIGUNG konstant ist.
+        # Vorher fest 220 px: in der breitesten Kammer 16 Grad, in der
+        # schmalsten 38 - und ausgerechnet die flachen trugen den Bogen.
+        t_hoehe = bauart.trichter_hoehe(form.rechts - form.links, form.ausgang)
+        segments.append(physics.Segment(form.links, form.unten - t_hoehe,
                                         tor_links, form.unten, SEG_RADIUS))
-        segments.append(physics.Segment(form.rechts, form.unten - 220,
+        segments.append(physics.Segment(form.rechts, form.unten - t_hoehe,
                                         tor_rechts, form.unten, SEG_RADIUS))
 
         # Zwischenboeden: abwechselnd links und rechts angesetzt, mit einer
@@ -463,11 +576,34 @@ def build_track(seed: int, teilnehmer: int,
         # verkeilt. Die Fluegel duerfen die Waende nicht beruehren, sonst
         # klemmt eine Kugel zwischen Fluegel und Wand.
         if bauart.rotor:
-            frei = min(mitte - form.links, form.rechts - mitte) - SEG_RADIUS
-            laenge = min(form.ausgang * 0.9, frei - MARBLE_D - 30)
-            if laenge > MARBLE_D * 0.8:
+            # Der Rotor muss IM Trichter stehen, nicht darueber.
+            #
+            # Erster Entwurf: y = unten - 250, also oberhalb des
+            # Trichteranfangs bei unten - 220. Bei 64 Kugeln reicht der
+            # Haufen bis dort hinauf und wird gegriffen; bei zehn nicht
+            # mehr - die Fluegel wischen ins Leere, waehrend die Kugeln
+            # unter ihnen liegen. Gemessen je Kammer: Kammer 1 bis 49
+            # 100 % lebendig, ab Kammer 55 NULL. Genau die letzten drei
+            # Minuten der Folge.
+            t_h = bauart.trichter_hoehe(form.rechts - form.links, form.ausgang)
+            hoehe = min(bauart.rotor_hoehe, t_h * 1.15)
+            # Halbe lichte Weite des Trichters auf dieser Hoehe.
+            anteil = hoehe / t_h
+            halb = (form.ausgang / 2
+                    + ((form.rechts - form.links) / 2 - form.ausgang / 2)
+                    * min(1.0, anteil))
+            # Zwei Deckel, und beide sind noetig:
+            #   * der Platz an dieser Stelle des Trichters
+            #   * eine feste Obergrenze relativ zum Ausgang
+            # Ohne den zweiten wuchs der Rotor in der ersten Kammer auf
+            # 788 px und fegte die halbe Kammer aus - gemessen gingen ALLE
+            # 64 Kugeln durch die Waende verloren. Ein Rotor soll den
+            # Haufen aufruehren, nicht wegraeumen.
+            laenge = min(halb - MARBLE_D * 0.5 - SEG_RADIUS - 8,
+                         form.ausgang * bauart.rotor_spanne)
+            if laenge > MARBLE_D * 0.6:
                 rotoren.append(physics.Rotor(
-                    x=mitte + versatz, y=form.unten - 250,
+                    x=mitte + versatz, y=form.unten - hoehe,
                     laenge=laenge,
                     drehzahl=bauart.rotor_drehzahl
                     * (1 if form.nummer % 2 else -1),
@@ -729,11 +865,28 @@ class Kammern(physics.Regel):
         if len(drunter) < form.weiter and not abgelaufen:
             return set()
 
-        if len(drunter) >= form.weiter:
-            raus = sorted(self.aktiv - drunter, key=lambda i: y_jetzt[i])
-        else:
-            wieviele = len(self.aktiv) - form.weiter
-            raus = sorted(self.aktiv, key=lambda i: y_jetzt[i])[:max(0, wieviele)]
+        # Erst eine vollstaendige Rangfolge dieser Kammer aufstellen, dann
+        # den Schwanz abschneiden. Das ist NICHT dasselbe wie "wer nicht
+        # durch ist, fliegt":
+        #
+        # Die alte Fassung setzte `raus = aktiv - drunter` und traf damit
+        # genau `len(aktiv) - len(drunter)` Kugeln. Nur wenn exakt `weiter`
+        # gleichzeitig unten sind, ist das die richtige Zahl. Kommen MEHR
+        # zugleich durch, scheidet NIEMAND aus - die Kammer gilt als
+        # erledigt, und am Ende stehen zwei Sieger im Ziel.
+        #
+        # Solange der Ausgang eng war, konnte das nicht passieren: durch ein
+        # Nadeloehr kommt niemand gleichzeitig. Gemessen am 31.07.2026, als
+        # der Ausgang auf fuenf Kugelbreiten ging: seed 11 endete mit 62 von
+        # 63 Ausscheidungen und ZWEI im Ziel. Der Fehler lag die ganze Zeit
+        # da, die Geometrie hat ihn nur nie ausgeloest.
+        #
+        # Gewertet wird, wer zuerst DURCH war (die Zeit steht in `durch`),
+        # dann, wer am tiefsten steht. Nie die Startnummer - das ist die
+        # Lehre aus B2.
+        rangfolge = (sorted(drunter, key=lambda i: self.durch[i])
+                     + sorted(self.aktiv - drunter, key=lambda i: -y_jetzt[i]))
+        raus = rangfolge[form.weiter:]
 
         for i in raus:
             self.ausgeschieden[i] = zeit
@@ -793,12 +946,13 @@ def run(seed: int, teilnehmer: int = 64,
     """Einen Lauf rechnen."""
     track = build_track(seed, teilnehmer, bauart)
     formen = kammerformen(teilnehmer, bauart)
+    grenze = notbremse(teilnehmer, bauart)
     return physics.simulate(
         track, seed,
         regel=Kammern(formen, track.finish_y, halt_beat=bauart.halt_beat),
         marks=[f.austritt for f in formen],
         count=teilnehmer,
-        max_seconds=notbremse(teilnehmer, bauart),
+        max_seconds=grenze,
         # Geduldsuhr praktisch aus. Sie beendet einen Lauf, sobald der
         # Erste im Ziel ist – gedacht fuer ein 30-Sekunden-Rennen, in dem
         # danach nur noch Nachzuegler ausrollen. Hier laufen zu dem
@@ -806,9 +960,14 @@ def run(seed: int, teilnehmer: int = 64,
         # hineingeschnitten: gemessen 34 von 63 Ausscheidungen, obwohl die
         # Stage-Uhr sauber lief. Die Laenge deckelt jetzt die Stage-Uhr,
         # nicht die Geduld.
-        patience_seconds=notbremse(teilnehmer, bauart),
+        patience_seconds=grenze,
         iterationen=SOLVER_ITERATIONEN,
+        # Die Notbremse gehoert ins Ergebnis, sonst kann `check` sie nicht
+        # sehen. Ein Lauf, der in sie hineinlaeuft, hat sich NICHT selbst
+        # beendet - aber mit 2520 s lag er bequem im erlaubten Fenster von
+        # 300 bis 3600 s und wurde nie beanstandet.
         extras={"mark_label": "STAGE",
+                "notbremse": round(grenze, 1),
                 "kammern": [[f.links, f.oben, f.rechts, f.unten, f.weiter]
                             for f in formen]})
 
@@ -849,11 +1008,43 @@ MIN_KUGEL_KUGEL = 0.25
 
 #: Anteil der Laufzeit, in dem sich mindestens jede zehnte Kugel bewegt.
 #:
-#: Ohne dieses Kriterium ist ein Lauf "brauchbar", der 19 von 23 Minuten
-#: stillsteht - genau so ist SHOW-01 durch alle Pruefungen gekommen. Es ist
-#: das einzige Kriterium, das den Unterschied zwischen einem Rennen und
-#: einem Standbild misst.
+#: Nur noch BERICHTET, nicht mehr gewertet - gewertet wird `MAX_STILLSTAND`.
+#: Der Grund steht dort.
 MIN_LEBENDIG = 0.75
+
+#: Laengste Strecke am Stueck, in der sich fast nichts bewegt. IN SEKUNDEN.
+#:
+#: Der Vorgaenger war `lebendig_schlechteste`, ein ANTEIL je Kammer, und er
+#: hat den Unterschied zwischen Rennen und Standbild richtig gefunden,
+#: solange eine Kammer minutenlang stehen konnte. Seit die Kammern
+#: durchlaessig sind, dauern sie drei bis acht Sekunden - und dann bewertet
+#: derselbe Anteil zwei voellig verschiedene Videos gleich:
+#:
+#:     vier Sekunden Sammeln in einer Acht-Sekunden-Kammer   = 50 %
+#:     vier Minuten Stillstand in einer Acht-Minuten-Kammer  = 50 %
+#:
+#: Das erste ist der Spannungsaufbau, den die Sperre erzeugen SOLL; das
+#: zweite ist ein Standbild. Ein Anteil kann sie nicht unterscheiden, eine
+#: Dauer schon.
+#:
+#: GEMESSEN am 31.07.2026 an vier Seeds, je einem vollen Lauf:
+#:
+#:     alte Bauart   80,5 · 154,5 · 170,0 · 235,6 s
+#:     neue Bauart    1,2 ·   1,4 ·   3,2 s      (und 215,2 s bei seed 7)
+#:
+#: Der Abstand ist Faktor 25 nach beiden Seiten, die Schwelle deshalb
+#: unkritisch. Zwoelf Sekunden heisst: laenger als eine ganze Kammer ist
+#: keine Sammelpause mehr.
+#:
+#: seed 7 zeigt, dass das Kriterium weiterhin greift - dort verkeilen sich
+#: 19 Kugeln bewegungslos im Trichter von Kammer 40, und der Lauf wird
+#: abgelehnt. Genau dafuer gibt es die Seed-Suche.
+#:
+#: Die Schwelle steht in `physics`, nicht hier: sie gilt fuer jede
+#: Disziplin, und sie ist ueber alle vier gemessen. Zuerst stand hier 12,
+#: aus den Arena-Zahlen allein; die Messung quer ueber die Disziplinen
+#: ergab 8 - alles Gesunde liegt unter 3,1 s, alles Kaputte ueber 15,3 s.
+MAX_STILLSTAND = physics.MAX_STILLSTAND
 
 
 def kennzahlen(result: physics.RunResult) -> dict:
@@ -892,10 +1083,48 @@ def kennzahlen(result: physics.RunResult) -> dict:
     lebendig = (sum(1 for x in bewegt if x >= 0.10) / len(bewegt)
                 if bewegt else 0.0)
 
+    # Und dasselbe je KAMMER, denn der Mittelwert verdeckt genau den Fall,
+    # um den es geht: gemessen an SHOW-01 waren die Kammern 1 bis 49 zu
+    # 100 % lebendig und ab Kammer 55 zu NULL - im Mittel 77 %, in den
+    # letzten drei Minuten Stillstand. Gewertet wird deshalb die
+    # SCHLECHTESTE Kammer.
+    # Das ENDE gehoert dazu, nicht nur die Ausscheidungen. Sonst bleibt der
+    # Abschnitt nach der letzten Ausscheidung ungemessen - und genau dort
+    # laeuft ein kaputter Lauf aus: gemessen 25 Minuten, in denen der
+    # Ueberlebende vor dem Ausgang hin und her geschlagen wurde, waehrend
+    # `lebendig_schlechteste` 99 % meldete.
+    grenzen = [0.0] + sorted(result.eliminated.values()) + [result.duration]
+    je_kammer = []
+    for k in range(len(grenzen) - 1):
+        f0 = int(grenzen[k] * fps) + 1
+        f1 = min(len(result.frames), int(grenzen[k + 1] * fps))
+        if f1 - f0 < fps:            # Kammern unter einer Sekunde uebergehen
+            continue
+        n = ges = 0
+        for f in range(f0, f1, 3):
+            raus = {i for i, t in result.eliminated.items() if t * fps <= f}
+            aktiv = [i for i in range(len(result.frames[f])) if i not in raus]
+            if not aktiv:
+                continue
+            b = sum(1 for i in aktiv
+                    if abs(result.frames[f][i][1] - result.frames[f - 1][i][1]) > 3.0
+                    or abs(result.frames[f][i][0] - result.frames[f - 1][i][0]) > 3.0)
+            ges += 1
+            if b / len(aktiv) >= 0.10:
+                n += 1
+        if ges:
+            je_kammer.append(n / ges)
+    schlechteste = min(je_kammer) if je_kammer else 0.0
+
+    # Und schliesslich die Zahl, die WIRKLICH "das Video steht" misst. Sie
+    # steht in `physics`, nicht hier: sie gilt fuer jede Disziplin, und
+    # viermal kopiert waere sie viermal anders repariert worden.
     return {
         "dauer": result.duration,
         "bewegt_mittel": sum(bewegt) / len(bewegt) if bewegt else 0.0,
         "lebendig": lebendig,
+        "lebendig_schlechteste": schlechteste,
+        "stillstand": physics.stillstand(result),
         "kugel_kugel": arten.get("marble", 0) / gesamt,
         "hits_je_s": len(result.hits) / max(0.001, result.duration),
         "ausgeschieden": len(result.eliminated),
@@ -916,6 +1145,18 @@ def check(result: physics.RunResult) -> list[str]:
     if k["dauer"] > MAX_SECONDS:
         probleme.append(f"zu lang: {k['dauer']:.0f}s")
 
+    # Die Notbremse ist KEINE Laufzeit, sie ist ein Abbruch. Sie fiel bisher
+    # durch jedes Raster: 2520 s liegen mitten im erlaubten Fenster, und
+    # `ausgeschieden` und `lebendig` koennen dabei gruen sein, weil die
+    # Raeumzeit die Kaskade auch ohne jede Bewegung zu Ende zaehlt. Genau so
+    # ist am 31.07.2026 zweimal "bestanden" gemeldet worden, waehrend das
+    # Video stand.
+    grenze = (result.extras or {}).get("notbremse")
+    if grenze and k["dauer"] >= grenze - 1.0:
+        probleme.append(
+            f"in die Notbremse gelaufen ({grenze:.0f}s) – der Lauf hat sich "
+            f"nicht selbst beendet, irgendwo haengt jemand fest")
+
     if k["ausgeschieden"] != teilnehmer - 1:
         probleme.append(
             f"{k['ausgeschieden']} statt {teilnehmer - 1} Ausscheidungen – "
@@ -929,11 +1170,12 @@ def check(result: physics.RunResult) -> list[str]:
             f"{k['totzeit']:.0f}s am Stueck ohne Ausscheidung "
             f"(hoechstens {MAX_TOTZEIT:.0f}s)")
 
-    if k["lebendig"] < MIN_LEBENDIG:
+    if k["stillstand"] > MAX_STILLSTAND:
         probleme.append(
-            f"nur {k['lebendig'] * 100:.0f} % der Laufzeit bewegt sich "
-            f"ueberhaupt etwas (mindestens {MIN_LEBENDIG * 100:.0f} %) – "
-            f"der Pulk steht, statt zu laufen")
+            f"{k['stillstand']:.0f}s am Stueck ohne Bewegung "
+            f"(hoechstens {MAX_STILLSTAND:.0f}s) – irgendwo steht der Pulk, "
+            f"auch wenn der Schnitt ({k['lebendig'] * 100:.0f} %) gut "
+            f"aussieht und die Ausscheidungen weiterzaehlen")
 
     if k["kugel_kugel"] < MIN_KUGEL_KUGEL:
         probleme.append(

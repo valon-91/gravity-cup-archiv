@@ -234,6 +234,101 @@ def engstellen(track: "Track", min_gap: float) -> list[str]:
     return maengel
 
 
+def mindest_luecke(feld: int, zuschlag: float = 10.0) -> float:
+    """Wie breit eine Luecke sein muss, damit ein Feld dieser Groesse
+    nicht daran haengenbleibt.
+
+    Das ist die Fehlerklasse, die dieses Projekt fuenfmal getroffen hat:
+    B4 (36 px zwischen Rampenende und Wand, 94 % der Laeufe verloren),
+    B7 (18 px Rest bei 64 px Kugel), B8 (126 px freier Kanal an der Wand,
+    132 von 200 Kugeln in die aeussersten Faecher), die Arena (Ausgang mit
+    zwei Kugelbreiten verklemmt dauerhaft) und zuletzt am 31.07.2026
+    111 px zwischen einem Stift und der Seitenwand.
+
+    Jedes Mal wurde der Vorfall behoben und mit einem Test festgenagelt.
+    Was fehlte, war die KOPPLUNG: wie breit eine Luecke sein muss, haengt
+    nicht an der Kugel, sondern am FELD. Bei fuenf Teilnehmern erreicht
+    praktisch nie ein zweiter dieselbe Luecke im selben Augenblick - wer
+    warten muss, faehrt eben hinterher. In einer Kammer mit hundert
+    erreichen sie jede Luecke gleichzeitig, und zwei brauchen zusammen
+    128 px.
+
+    GEMESSEN sind die beiden Enden:
+      *   5 Teilnehmer: 19 ausgestrahlte Runden, kein einziger Keil an
+          einem Stift - eine Kugelbreite reicht.
+      * 100 Teilnehmer: zehn von 132 Kammerproben blieben mit EINER
+          Kugelbreite stehen, mit zwei keine einzige.
+
+    NICHT gemessen ist die Schwelle dazwischen. Die 12 hier ist bewusst
+    vorsichtig gewaehlt und keine Messung - wer sie genauer braucht, misst
+    sie mit `tools/probe_arena.py`, das kostet Sekunden. Ihr Zweck ist
+    nicht Genauigkeit, sondern dass ein groesser werdendes Feld nicht mehr
+    stillschweigend an einer alten Luecke vorbeikommt.
+    """
+    kugeln = 1 if feld <= 12 else 2
+    return kugeln * 2 * theme.MARBLE_RADIUS + zuschlag
+
+
+#: Laengster Stillstand, den ein sendefaehiger Lauf haben darf, in Sekunden.
+#:
+#: GEMESSEN am 31.07.2026 ueber alle vier Disziplinen, 12 bis 20 Seeds je
+#: Disziplin - vorher gab es diese Zahl nur in der Arena:
+#:
+#:     descent       1,2 bis  3,1 s
+#:     elimination   0,0 bis  1,3 s
+#:     scatter       0,8 bis  1,5 s   (und 15,3 / 21,1 s bei zwei Seeds)
+#:     arena         1,3 bis  1,6 s   (kaputte Fassung: 80 bis 236 s)
+#:
+#: Alles Gesunde liegt unter 3,1 s, alles Kaputte ueber 15,3 s. Acht
+#: Sekunden liegen mit Faktor 2,5 nach beiden Seiten in der Luecke; die
+#: Zahl ist deshalb unkritisch.
+#:
+#: Die zwei Streuungs-Ausreisser werden heute schon abgelehnt - aber
+#: INDIREKT, ueber "zu lang" und "nicht gelandet". Ein Lauf, der fuenfzehn
+#: Sekunden steht und dabei im Zeitfenster bleibt, kaeme durch. Genau
+#: diese Art Umweg hat die Show zwei Tage gekostet.
+MAX_STILLSTAND = 8.0
+
+
+def stillstand(result: "RunResult", anteil: float = 0.10,
+               weg_px: float = 3.0) -> float:
+    """Laengste Strecke am Stueck, in der sich fast nichts bewegt, in Sekunden.
+
+    Die Kennzahl, die vier Fehler dieses Projekts gemeinsam gefunden
+    haette - alle vier meldeten gruen, waehrend das Bild stand:
+    ein abgeschnittenes Video, das ffmpeg mit Code 0 quittierte; eine
+    Torpruefung, die durch eine falsche Paarung nichts prueft und
+    "in Ordnung" meldet; eine Kugel, die auf einem Rotorfluegel im Kreis
+    getragen wird und sich damit BEWEGT, ohne je anzukommen; und ein
+    Lauf, der 19 von 23 Minuten steht, waehrend die Raeumzeit die
+    Ausscheidungen zu Ende zaehlt.
+
+    Bewusst eine DAUER und kein Anteil. Ein Anteil haengt daran, wie lange
+    ein Abschnitt zufaellig dauert, und bewertet damit vier Sekunden
+    Sammeln in einer Acht-Sekunden-Kammer genauso wie vier Minuten
+    Stillstand in einer Acht-Minuten-Kammer.
+
+    Gezaehlt wird JEDES Bild - jedes dritte wuerde eine Strecke
+    zerschneiden. Ausgeschiedene zaehlen nicht mit: sie stehen mit Absicht.
+    """
+    fps = result.fps
+    laengste = jetzt = 0
+    for f in range(1, len(result.frames)):
+        raus = {i for i, t in result.eliminated.items() if t * fps <= f}
+        aktiv = [i for i in range(len(result.frames[f])) if i not in raus]
+        if not aktiv:
+            break
+        n = sum(1 for i in aktiv
+                if abs(result.frames[f][i][1] - result.frames[f - 1][i][1]) > weg_px
+                or abs(result.frames[f][i][0] - result.frames[f - 1][i][0]) > weg_px)
+        if n / len(aktiv) < anteil:
+            jetzt += 1
+            laengste = max(laengste, jetzt)
+        else:
+            jetzt = 0
+    return laengste / fps
+
+
 def linie_gequert(y_vorher: float, y_jetzt: float,
                   linie: float) -> float | None:
     """Anteil des Schrittes, bei dem `linie` nach unten gequert wurde (0..1).
@@ -446,6 +541,21 @@ class SimulationError(RuntimeError):
 #: ploetzlich weniger Teilnehmer.
 SOLVER_ITERATIONEN = 10
 
+#: Reibung der Rotorfluegel. FAST NULL, und das ist der Punkt.
+#:
+#: Mit normaler Wandreibung (0,42) kann eine Kugel auf einem Fluegel LIEGEN
+#: BLEIBEN und wird im Kreis getragen - gemessen am 31.07.2026: der
+#: Ueberlebende sass 13 px neben der Rotorachse, bewegte sich 51 px in drei
+#: Sekunden und kam 10 697 px vor dem Ziel nie an. Die Folge lief danach
+#: 19 Minuten leer gegen die Notbremse.
+#:
+#: Heimtueckisch daran: so eine Kugel BEWEGT sich, jede Bewegungskennzahl
+#: meldet gruen. Sie kommt nur nirgendwo an.
+#:
+#: Ein glatter Fluegel stoesst an, statt zu greifen - genau das soll ein
+#: Ruehrwerk tun.
+ROTOR_FRICTION = 0.04
+
 
 def simulate(track: Track, seed: int, *, fps: int = theme.FPS,
              max_seconds: float = MAX_SECONDS,
@@ -520,7 +630,8 @@ def simulate(track: Track, seed: int, *, fps: int = theme.FPS,
             a = k * 2 * math.pi / rot.fluegel
             spitze = (math.cos(a) * rot.laenge, math.sin(a) * rot.laenge)
             fluegel = pymunk.Segment(koerper, (0.0, 0.0), spitze, rot.radius)
-            fluegel.elasticity, fluegel.friction = WALL_ELASTICITY, WALL_FRICTION
+            fluegel.elasticity = WALL_ELASTICITY
+            fluegel.friction = ROTOR_FRICTION
             fluegel.collision_type = KIND_WALL
             space.add(fluegel)
 
