@@ -27,8 +27,14 @@ from pathlib import Path
 
 from .. import build
 from ..core import audio, physics, theme
-from ..disciplines import arena
+from ..disciplines import arena, gauntlet
 from . import karten
+
+#: Die Disziplinen der Langform, mit ihrer Feldgroesse. `arena` traegt
+#: 100 (gemessen 31.07.), `gauntlet` 112 – die Kennungen in `theme`
+#: tragen bis 112, und mehr Teilnehmer sind der Laengen-Hebel ohne
+#: Totzeit.
+DISZIPLINEN = {"arena": (arena, 100), "gauntlet": (gauntlet, 112)}
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -62,7 +68,7 @@ ARCHIV = build.ARCHIV
 
 
 def manifest(seed, teilnehmer, bauart, r, scale, crf, preset, ziel,
-             bildfolge, ton, runde):
+             bildfolge, ton, runde, disziplin=arena):
     """Alles, was noetig ist, um diese Folge nachzurechnen.
 
     Ohne diese Datei ist "the outcome is simulated, not written" eine
@@ -81,7 +87,7 @@ def manifest(seed, teilnehmer, bauart, r, scale, crf, preset, ziel,
         "runde": runde,
         "seed": seed,
         "teilnehmer": teilnehmer,
-        "disziplin": arena.NAME,
+        "disziplin": disziplin.NAME,
         "erzeugt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "codestand": build.codestand(),
         "versionen": build.versionen(exe),
@@ -107,8 +113,8 @@ def manifest(seed, teilnehmer, bauart, r, scale, crf, preset, ziel,
             "bilder": len(r.frames),
             "aufpraelle": len(r.hits),
         },
-        "kennzahlen": arena.kennzahlen(r),
-        "annahme": arena.check(r),
+        "kennzahlen": disziplin.kennzahlen(r),
+        "annahme": disziplin.check(r),
         "ton_messung": ton,
         "pruefsummen": {
             "lauf": hashlib.sha256(
@@ -125,18 +131,27 @@ def manifest(seed, teilnehmer, bauart, r, scale, crf, preset, ziel,
 
 
 def beschreibung(m):
-    """Die Videobeschreibung, aus dem Manifest erzeugt."""
+    """Die Videobeschreibung, aus dem Manifest erzeugt.
+
+    Die erste Zeile ist zugleich der YouTube-TITEL (`hochladen --datei`
+    liest sie so). Der Sieger steht bewusst GANZ UNTEN als markierter
+    Spoiler: bei einem 30-Sekunden-Short ist er in der Beschreibung
+    egal, bei fuenf Minuten Langform stand er vorher in Zeile 3 – ueber
+    der Falz, sichtbar vor dem ersten Play. Am Kanalversprechen aendert
+    das nichts, das Manifest traegt ihn oeffentlich.
+    """
     e = m["ergebnis"]
     zeilen = [
-        "GRAVITY CUP SHOW - " + str(m["teilnehmer"]) + " enter, one leaves",
+        "GRAVITY CUP SHOW · " + str(m["teilnehmer"]) + " Enter, One Leaves",
         "",
-        "Winner: " + e["sieger"],
-        str(e["kammern"]) + " stages, " + str(e["ausgeschieden"])
-        + " eliminations, " + format(e["dauer_s"] / 60, ".0f") + " minutes.",
+        str(m["teilnehmer"]) + " marbles, " + str(e["kammern"])
+        + " stages. Every stage is a landscape of giant shapes with one "
+        "gated exit - when the gate opens, everybody wants through at "
+        "once, and the slowest are OUT. Mass cuts early, duels at the "
+        "end, one survivor.",
         "",
-        "The outcome is simulated, not written.",
-        "",
-        "Check it yourself:",
+        "The outcome is simulated, not written. No script, no cuts, no "
+        "retakes - a physics engine decides, and you can check it:",
         "  seed        " + str(m["seed"]),
         "  entrants    " + str(m["teilnehmer"]),
         "  discipline  " + m["disziplin"],
@@ -154,6 +169,9 @@ def beschreibung(m):
         "",
         "No music, no stock sound: every impact is computed from the "
         "collision it belongs to.",
+        "",
+        "Result (spoiler, same as the public manifest): winner "
+        + e["sieger"] + ", full order in the archive.",
         "",
         "#marblerace #physics #simulation",
     ]
@@ -190,8 +208,9 @@ def pruefen(pfad):
 
     theme.set_format(m["gestaltung"]["ausgabeformat"])
     theme.set_competitors(theme.feld(m["teilnehmer"]))
-    bauart = arena.Bauart(**m["bauart"])
-    r = arena.run(m["seed"], m["teilnehmer"], bauart)
+    modul, _ = DISZIPLINEN[m.get("disziplin", "arena")]
+    bauart = modul.Bauart(**m["bauart"])
+    r = modul.run(m["seed"], m["teilnehmer"], bauart)
 
     ist = list(r.order)
     soll = m["ergebnis"]["reihenfolge_index"]
@@ -269,24 +288,24 @@ def trailer_bauen(ziel, scale=None, crf=19, preset="slow",
 
 def bauen(seed: int, ziel: Path, teilnehmer: int = TEILNEHMER,
           scale: int | None = None, crf: int = 19, preset: str = "slow",
-          bauart: arena.Bauart | None = None) -> dict:
+          bauart=None, disziplin=arena) -> dict:
     """Seed rein, MP4 raus."""
     theme.set_format("quer")
     theme.set_competitors(theme.feld(teilnehmer))
     scale = theme.SUPERSAMPLE if scale is None else scale
-    bauart = bauart or arena.VORGABE
+    bauart = bauart or disziplin.VORGABE
     exe = build.ffmpeg_pfad()
     t_start = time.perf_counter()
 
     # --- 1. Lauf ---------------------------------------------------------
     t0 = time.perf_counter()
-    r = arena.run(seed, teilnehmer, bauart)
-    k = arena.kennzahlen(r)
+    r = disziplin.run(seed, teilnehmer, bauart)
+    k = disziplin.kennzahlen(r)
     print(f"[1/4] Lauf      {len(r.frames)} Bilder, {r.duration:.0f}s, "
           f"{len(r.hits)} Aufpraelle, {k['kugel_kugel'] * 100:.0f} % "
           f"Kugel-Kugel   ({time.perf_counter() - t0:.0f}s)")
 
-    probleme = arena.check(r)
+    probleme = disziplin.check(r)
     if probleme:
         print("[2/4] Pruefung  UEBERGANGEN:")
         for pr in probleme:
@@ -320,7 +339,7 @@ def bauen(seed: int, ziel: Path, teilnehmer: int = TEILNEHMER,
     vorne = karten.vorspann_bilder(theme.FPS)
     gesamt = vorne + len(r.frames) + nachlauf
     karte_start = max(0, len(r.frames) - int(build.KARTE_VORLAUF * theme.FPS))
-    hook = (arena.HOOK[0], arena.HOOK[1].format(n=teilnehmer))
+    hook = (disziplin.HOOK[0], disziplin.HOOK[1].format(n=teilnehmer))
     comps = theme.competitors()
 
     def bild_fuer(f):
@@ -341,7 +360,7 @@ def bauen(seed: int, ziel: Path, teilnehmer: int = TEILNEHMER,
     # --- 4. Archiv -------------------------------------------------------
     runde = ziel.stem.upper()
     m = manifest(seed, teilnehmer, bauart, r, scale, crf, preset, ziel,
-                 ergebnis["bildfolge"], messung, runde)
+                 ergebnis["bildfolge"], messung, runde, disziplin)
     ARCHIV.mkdir(parents=True, exist_ok=True)
     (ARCHIV / (runde + ".json")).write_text(
         json.dumps(m, indent=2, ensure_ascii=False) + NL_, encoding="utf-8")
@@ -366,7 +385,10 @@ def main() -> int:
     ap.add_argument("--pruefen", metavar="MANIFEST",
                     help="eine Folge aus ihrem Manifest nachrechnen")
     ap.add_argument("--seed", type=int, default=2)
-    ap.add_argument("--teilnehmer", type=int, default=TEILNEHMER)
+    ap.add_argument("--disziplin", choices=sorted(DISZIPLINEN),
+                    default="arena")
+    ap.add_argument("--teilnehmer", type=int,
+                    help="Vorgabe: Feldgroesse der Disziplin")
     ap.add_argument("--out", default="data/show.mp4")
     ap.add_argument("--vorschau", action="store_true",
                     help="ohne Supersampling – deutlich schneller, nur zum Sichten")
@@ -384,16 +406,19 @@ def main() -> int:
         trailer_bauen(Path(a.out), 1 if a.vorschau else a.supersample, a.crf, a.preset)
         return 0
 
-    bauart = arena.VORGABE
+    modul, feld = DISZIPLINEN[a.disziplin]
+    teilnehmer = a.teilnehmer if a.teilnehmer is not None else feld
+    bauart = modul.VORGABE
     if a.halt_erste is not None or a.halt_letzte is not None:
-        bauart = arena.Bauart(
+        bauart = modul.Bauart(
             halt_erste=a.halt_erste if a.halt_erste is not None
-            else arena.VORGABE.halt_erste,
+            else modul.VORGABE.halt_erste,
             halt_letzte=a.halt_letzte if a.halt_letzte is not None
-            else arena.VORGABE.halt_letzte)
+            else modul.VORGABE.halt_letzte)
 
     scale = 1 if a.vorschau else a.supersample
-    bauen(a.seed, Path(a.out), a.teilnehmer, scale, a.crf, a.preset, bauart)
+    bauen(a.seed, Path(a.out), teilnehmer, scale, a.crf, a.preset, bauart,
+          disziplin=modul)
     return 0
 
 

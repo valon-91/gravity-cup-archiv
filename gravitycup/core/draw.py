@@ -610,6 +610,22 @@ class Canvas:
             self.text_centered(y, text, size_key, fill=farbe, alpha=alpha)
         return layout
 
+    @staticmethod
+    def endkarte_zeilen(anzahl: int, tabelle_y: float, zeile_h: float,
+                        bildhoehe: float) -> tuple[int, bool]:
+        """Wie viele Tabellenzeilen der Endkarte ins Bild passen.
+
+        Liefert (gezeigte Zeilen, gekuerzt?). Bei Kuerzung ist eine der
+        passenden Zeilen fuer den "+N"-Vermerk reserviert. Als reine
+        Funktion herausgeloest, damit die Eigenschaft „die Endkarte
+        bleibt im Bild" testbar ist, ohne eine Leinwand zu bauen.
+        """
+        frei = bildhoehe - 40 - tabelle_y - 2 * theme.PANEL_PAD
+        passt = max(2, int(frei // zeile_h))
+        if anzahl <= passt:
+            return anzahl, False
+        return passt - 1, True
+
     def result_card(self, order: list[int], comps=None,
                     alpha: int = 255, label: str = "WINNER",
                     points: list[int] | None = None) -> None:
@@ -625,8 +641,10 @@ class Canvas:
         sieger = comps[order[0]]
 
         # Die ganze Karte sitzt mittig im sicheren Bereich zwischen der
-        # Kopfzeile oben und der Shorts-Bedienleiste unten.
-        kopf_y = 520
+        # Kopfzeile oben und der Shorts-Bedienleiste unten. Im Hochformat
+        # sind das die gewohnten 520 px; im Vollbild (1080 hoch) muss der
+        # Kopf hoeher, sonst beginnt die Tabelle unter der Bildmitte.
+        kopf_y = min(520.0, theme.HEIGHT * 0.30)
         self.text_centered(kopf_y, label, "result_label",
                            fill=theme.TEXT_MUTED, alpha=alpha)
         self.text_centered(kopf_y + 110, sieger.name, "result_name",
@@ -639,9 +657,16 @@ class Canvas:
             fill=sieger.color + (alpha,),
         )
 
-        # Reihenfolge darunter
+        # Reihenfolge darunter. GEKAPPT auf das, was ins Bild passt: mit
+        # 112 Teilnehmern war die Tabelle 8 000 px hoch, und die letzte
+        # sichtbare Zeile endete mitten im Buchstaben an der Bildkante –
+        # gesehen an SHOW-02 am 03.08.2026, dieselbe Klasse wie die
+        # 108-px-Namensspalte („100GOLD K"). Die Fuenfer-Endkarte der
+        # Kurzfolgen bleibt unveraendert (Kappung greift erst darueber).
         tabelle_y = kopf_y + 280
         zeile_h = 78
+        gezeigt, gekuerzt = self.endkarte_zeilen(len(order), tabelle_y,
+                                                 zeile_h, theme.HEIGHT)
         breite = 620
         x = (theme.WIDTH - breite) / 2
         # Deckend genug, dass weder Ziellinie noch eine ausrollende Kugel
@@ -652,11 +677,19 @@ class Canvas:
         # (178) blieben davon 9 von 255 uebrig – im fertigen Video als
         # gestrichelte Linie quer durch die letzte Tabellenzeile sichtbar.
         # Bei 236 sind es 2 von 255 und damit nicht mehr zu sehen.
+        zeilen_gesamt = gezeigt + (1 if gekuerzt else 0)
         self.panel((x, tabelle_y, x + breite,
-                    tabelle_y + zeile_h * len(order) + theme.PANEL_PAD * 2),
+                    tabelle_y + zeile_h * zeilen_gesamt + theme.PANEL_PAD * 2),
                    alpha=int(236 * alpha / 255))
 
-        for rang, idx in enumerate(order):
+        if gekuerzt:
+            y = (tabelle_y + theme.PANEL_PAD + zeile_h * gezeigt
+                 + zeile_h / 2)
+            self.text_centered(y - zeile_h / 2 + 14,
+                               f"+{len(order) - gezeigt}", "card_entry",
+                               fill=theme.TEXT_MUTED, alpha=alpha)
+
+        for rang, idx in enumerate(order[:gezeigt]):
             comp = comps[idx]
             y = tabelle_y + theme.PANEL_PAD + zeile_h * rang + zeile_h / 2
             self.text(x + 34, y, f"{rang + 1}", "card_entry",

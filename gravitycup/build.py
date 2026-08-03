@@ -412,23 +412,33 @@ def ausgestrahlt(runde: str, youtube_id: str, archiv: Path = ARCHIV) -> int:
     return 0
 
 
-def stand_bis(runde: str | None):
+def stand_bis(runde: str | None, archiv: Path = ARCHIV):
     """Tabelle und Runden, wie sie zum Zeitpunkt DIESER Runde galten.
 
     NUR bis zu dieser Runde: das Archiv enthaelt beim Neubau einer alten
     Folge auch die spaeteren – die Beschreibung von Runde 1 zeigte sonst den
     Stand nach Runde 3, also ein Ergebnis, das damals noch nicht feststand.
+
+    Bricht LAUT ab, wenn das Archiv nicht auswertbar ist. Bis zum
+    03.08.2026 wurde der ArchivFehler hier verschluckt und (None, None)
+    geliefert – jede Beschreibung waere still ohne Punktestand geschrieben
+    worden, waehrend alle Tests gruen waren.
     """
     treffer = standings.RUNDE_MUSTER.match(runde) if runde else None
     if not treffer:
         return None, None
     try:
         saison, nummer = int(treffer.group(1)), int(treffer.group(2))
-        runden_bisher = [r for r in standings.lade_runden(ARCHIV, saison)
+        runden_bisher = [r for r in standings.lade_runden(archiv, saison)
                          if r.nummer <= nummer]
         return standings.berechne(runden_bisher), runden_bisher
-    except standings.ArchivFehler:
-        return None, None
+    except standings.ArchivFehler as e:
+        raise SystemExit(
+            f"Archiv nicht auswertbar: {e}\n"
+            "Die Beschreibung braucht den Punktestand; ohne diesen Abbruch\n"
+            "wuerde sie still ohne Tabelle geschrieben. Erst das Archiv\n"
+            "reparieren, dann bauen."
+        ) from e
 
 
 def _rundenmarke(runde: str | None) -> str | None:

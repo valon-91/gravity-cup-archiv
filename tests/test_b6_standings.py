@@ -138,6 +138,32 @@ class TestArchivLesen(unittest.TestCase):
             with self.assertRaises(standings.ArchivFehler):
                 standings.lade_runden(Path(d))
 
+    def test_show_manifest_zaehlt_nicht_zur_saison(self):
+        """SHOW-01.json legte die gesamte Auswertung still (03.08.2026).
+
+        Langform-Manifeste gehoeren ins Archiv (der Pruefbefehl unter dem
+        Video braucht sie), aber nicht in die Tabelle. Merkmal ist
+        `format == "show"` – NICHT der Dateiname, damit ein verschriebener
+        Saisonname weiterhin laut durchfaellt (Test direkt darunter).
+        """
+        show = manifest("SHOW-01", list(range(N)))
+        show["format"] = "show"
+        with archiv(manifest("S01R01", list(range(N))), show) as d:
+            runden = standings.lade_runden(Path(d))
+        self.assertEqual([r.name for r in runden], ["S01R01"])
+
+    def test_stand_bis_bricht_laut_ab(self):
+        """`stand_bis` verschluckte den ArchivFehler und lieferte (None, None).
+
+        Folge: jede danach erzeugte Beschreibung verlor still den kompletten
+        Punktestand-Block – drei Tage lang, bei 343 gruenen Tests. Ein
+        kaputtes Archiv muss den Bau abbrechen, nicht die Tabelle weglassen.
+        """
+        with archiv(manifest("Folge-3", list(range(N)))) as d:
+            with self.assertRaises(SystemExit) as ctx:
+                build.stand_bis("S01R02", Path(d))
+        self.assertIn("nicht auswertbar", str(ctx.exception))
+
     def test_kaputtes_json_bricht_ab(self):
         with tempfile.TemporaryDirectory() as d:
             (Path(d) / "S01R01.json").write_text("{kaputt", encoding="utf-8")
@@ -474,6 +500,31 @@ class TestVideoAnbindung(unittest.TestCase):
                             runde="Folge 3", cache_nutzen=False,
                             archiv=False, leise=True)
             self.assertIn("SxxRyy", str(ctx.exception))
+
+
+class TestAmEchtenArchiv(unittest.TestCase):
+    """Laeuft ueber das ECHTE runs/-Verzeichnis, nicht ueber Attrappen.
+
+    Genau dieser Test fehlte am 31.07.: SHOW-01.json lag drei Tage im
+    Archiv und legte die Saisonauswertung still, waehrend alle Tests gruen
+    waren – jeder von ihnen baute sich sein eigenes sauberes Archiv.
+    Vorbild ist TestAmEchtenRepo in test_veroeffentlichen.py.
+    """
+
+    ECHTES_ARCHIV = Path(__file__).resolve().parents[1] / "runs"
+
+    def test_echtes_archiv_ist_auswertbar(self):
+        runden = standings.lade_runden(self.ECHTES_ARCHIV)
+        self.assertGreaterEqual(
+            len(runden), 19,
+            "S01 (9) + S02 (10) muessen mindestens da sein")
+        for r in runden:
+            self.assertRegex(r.name, r"^S\d{2}R\d{2}$")
+
+    def test_stand_bis_liefert_ueber_dem_echten_archiv(self):
+        tabelle, runden = build.stand_bis("S01R06", self.ECHTES_ARCHIV)
+        self.assertIsNotNone(tabelle, "Beschreibung braucht den Punktestand")
+        self.assertEqual(len(runden), 6, "genau die Runden bis R06")
 
 
 if __name__ == "__main__":

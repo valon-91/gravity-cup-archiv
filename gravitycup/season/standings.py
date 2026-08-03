@@ -134,6 +134,16 @@ def lies_manifest(pfad: Path) -> Runde | None:
         # Ein Probelauf ohne --runde. Zaehlt nicht zur Saison, ist aber auch
         # kein Fehler – deshalb still uebergehen.
         return None
+    if m.get("format") == "show":
+        # Langform-Manifeste (SHOW-xx) liegen bewusst im Archiv: der
+        # Pruefbefehl unter dem Video braucht sie. Zur Saison zaehlen sie
+        # nicht – kein SxxRyy-Name, keine Rangfolge ueber die Stammbesetzung.
+        # Nur DIESES Merkmal wird still uebergangen; ein verschriebener
+        # Saisonname faellt weiterhin unten laut durch. Gemessen am
+        # 03.08.2026: SHOW-01.json legte die gesamte Auswertung drei Tage
+        # still, waehrend 343 Tests gruen waren – kein Test lief ueber das
+        # echte runs/-Verzeichnis.
+        return None
     treffer = RUNDE_MUSTER.match(str(name))
     if not treffer:
         raise ArchivFehler(
