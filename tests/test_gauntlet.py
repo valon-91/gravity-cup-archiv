@@ -117,5 +117,48 @@ class TestEndkarte(unittest.TestCase):
         self.assertEqual((gezeigt, gekuerzt), (5, False))
 
 
+class TestVorlauf(unittest.TestCase):
+    """Was ein Zuschauer in Sekunde 0 sieht.
+
+    SHOW-02 stellte 8,6 s Tafeln vor das erste Bild des Rennens. Gemessen
+    nach acht Tagen (12.08.2026): 8 755 Aufrufe, durchschnittlich gesehen
+    0:05, Bindung 1,6 %. Der mittlere Zuschauer stieg 3,6 s aus, BEVOR
+    das Rennen begann – 98,4 % haben nie eine Kugel rollen sehen.
+
+    Dieselben Kugeln, dieselbe Physik, derselbe Ton halten in den
+    Kurzfolgen 43–71 %, und die zeigen ab Bild 1 das Feld mit dem
+    Aufhaenger DARUEBER.
+
+    Keiner der 347 Tests sah das: gemessen wurde die Simulation, das
+    Bild und der Ton – nie, was in Sekunde 0 auf dem Schirm steht.
+    """
+
+    def test_show_beginnt_mit_dem_rennen(self):
+        from gravitycup.tools import show
+        self.assertFalse(
+            show.VORSPANN,
+            "Die Show muss mit dem Rennen beginnen, nicht mit Tafeln "
+            "(Begruendung und Messung: show.VORSPANN)")
+
+    def test_vorlauf_bleibt_unter_der_entscheidungszeit(self):
+        """Der Waechter, falls der Vorspann je wieder eingeschaltet wird.
+
+        Die Grenze ist nicht gewaehlt, sondern die im Projekt bereits
+        gemessene: die Kurzfolgen bringen dieselbe Information in
+        HOOK_ENDE Bildern unter – ueber dem laufenden Rennen statt davor,
+        und halten damit bis 70,7 %.
+        """
+        from gravitycup import build
+        from gravitycup.tools import karten, show
+        if not show.VORSPANN:
+            self.skipTest("Vorspann ist aus – der Fall kann nicht eintreten")
+        vorlauf = karten.vorspann_bilder(theme.FPS) / theme.FPS
+        grenze = build.HOOK_ENDE / theme.FPS
+        self.assertLessEqual(
+            vorlauf, grenze,
+            f"{vorlauf:.1f} s ohne Rennen vor einem Video, dessen "
+            f"Zuschauer im Schnitt nach 5 s weg sind")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

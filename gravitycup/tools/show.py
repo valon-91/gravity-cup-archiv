@@ -66,6 +66,33 @@ NL_ = chr(10)
 #: ist ein anderes Format, aber dasselbe Versprechen.
 ARCHIV = build.ARCHIV
 
+#: Vorspann vor dem Rennen. AUS seit 12.08.2026, und die Begruendung ist
+#: gemessen, nicht geschmacklich.
+#:
+#: SHOW-02 stellte drei Tafeln von zusammen 8,6 s vor das erste Bild des
+#: Rennens. Nach acht Tagen sagt die Auswertung:
+#:
+#:     Video                        Vorspann   Ø gesehen   Bindung   Aufrufe
+#:     SHOW-02            (5:30)       8,6 s        0:05      1,6 %     8755
+#:     S01R08 Elimination (0:27)      keiner        0:19     70,7 %     1182
+#:     S01R09 Scatter     (0:31)      keiner        0:16     52,3 %      471
+#:     S01R02 Elimination (0:26)      keiner        0:13     50,6 %     3429
+#:
+#: Der durchschnittliche Zuschauer stieg 3,6 s aus, BEVOR das Rennen
+#: begann: 98,4 % haben nie eine Kugel rollen sehen. Dieselben Kugeln,
+#: dieselbe Physik, derselbe Ton halten in den Kurzfolgen bis 70,7 % -
+#: und die zeigen ab Bild 1 das Feld, mit dem Aufhaenger DARUEBER
+#: (`build.HOOK_START` = Bild 6, `HOOK_ENDE` = Bild 62).
+#:
+#: Die alte Begruendung steht im Modulkopf von `karten.py`: ohne Vorspann
+#: wisse der Zuschauer nicht, worauf er achten soll. Sie war plausibel und
+#: ist widerlegt - der Aufhaenger sagt dasselbe in zwei Sekunden ueber dem
+#: laufenden Rennen, Seed und Kammerzahl stehen im HUD, und das
+#: Nachrechnen steht in der Beschreibung.
+#:
+#: Der Schalter bleibt stehen, damit der Vergleich wiederholbar ist.
+VORSPANN = False
+
 
 def manifest(seed, teilnehmer, bauart, r, scale, crf, preset, ziel,
              bildfolge, ton, runde, disziplin=arena):
@@ -319,24 +346,24 @@ def bauen(seed: int, ziel: Path, teilnehmer: int = TEILNEHMER,
     wav.parent.mkdir(parents=True, exist_ok=True)
     stereo, messung = audio.build(r)
     # Stille fuer den Vorspann davorsetzen, sonst laeuft der Ton dem Bild
-    # um genau die Vorspannlaenge voraus.
-    import numpy as _np
-    stille = _np.zeros((int(karten.vorspann_bilder(theme.FPS) / theme.FPS
-                            * audio.SR), stereo.shape[1]))
-    stereo = _np.concatenate([stille, stereo])
+    # um genau die Vorspannlaenge voraus. Ohne Vorspann faellt sie weg -
+    # sonst beginnt die Show mit 8,6 s Stille ueber dem laufenden Rennen.
+    if VORSPANN:
+        import numpy as _np
+        stille = _np.zeros((int(karten.vorspann_bilder(theme.FPS) / theme.FPS
+                                * audio.SR), stereo.shape[1]))
+        stereo = _np.concatenate([stille, stereo])
     audio.write_wav(wav, stereo)
     print(f"[3/4] Ton       {wav.name}, {messung['lufs_nachher']:+.1f} LUFS "
           f"  ({time.perf_counter() - t0:.0f}s)")
 
     # --- 3. Bilder -------------------------------------------------------
     #
-    # Vorspann VOR dem Rennen. Ohne ihn sieht ein Zuschauer 64 Kugeln in
-    # einem Kasten und weiss nicht, worauf er achten soll - und die Regel
-    # ("wer als Letzter durch die Tuer kommt, ist raus") ist der Grund,
-    # warum man ueberhaupt hinschaut.
+    # Das Rennen ab Bild 1, der Aufhaenger darueber - wie in den
+    # Kurzfolgen. Warum kein Vorspann mehr davorsteht: siehe `VORSPANN`.
     tops = build.kamerafahrt(r)
     nachlauf = build.outro_frames(theme.FPS)
-    vorne = karten.vorspann_bilder(theme.FPS)
+    vorne = karten.vorspann_bilder(theme.FPS) if VORSPANN else 0
     gesamt = vorne + len(r.frames) + nachlauf
     karte_start = max(0, len(r.frames) - int(build.KARTE_VORLAUF * theme.FPS))
     hook = (disziplin.HOOK[0], disziplin.HOOK[1].format(n=teilnehmer))
